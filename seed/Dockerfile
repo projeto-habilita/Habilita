@@ -3,7 +3,7 @@
 # Multi-stage build com usuário não-root (UID/GID 1000) e imagens fixadas por tag e digest.
 
 # uv 0.13.1 (gerenciador de dependências Python)
-FROM ghcr.io/astral-sh/uv:0.13.1@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.4@sha256:9f130421e930bfbdc563c00740466603f8723158e90297d07957c2294640262b AS uv
 
 # ---------------------------------------------------------------------
 # base: Python 3.12.15 (Debian 13 "trixie") comum aos estágios
