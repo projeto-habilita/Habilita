@@ -269,7 +269,8 @@ def test_h19_ca3_t_iso_05_terceirizada_acessa_trabalhador_outra_terceirizada_ret
     )
     corpo_json = resposta.json()
     assert corpo_json.get("status") == 404, (
-        f"Esperado campo 'status': 404 no corpo problem+json em {rota}, mas obteve {corpo_json.get('status')}."
+        f"Esperado campo 'status': 404 no corpo problem+json em {rota}, "
+        f"mas obteve {corpo_json.get('status')}."
     )
     assert "title" in corpo_json or "type" in corpo_json, (
         f"Corpo da resposta em {rota} não segue o contrato Problem Details: {corpo_json}"
@@ -347,7 +348,8 @@ def test_h19_ca1_t_iso_07_gestor_gera_url_download_documento_outro_tenant_retorn
     )
     corpo_json = resposta.json()
     assert corpo_json.get("status") == 404, (
-        f"Esperado campo 'status': 404 no corpo problem+json em {rota}, mas obteve {corpo_json.get('status')}."
+        f"Esperado campo 'status': 404 no corpo problem+json em {rota}, "
+        f"mas obteve {corpo_json.get('status')}."
     )
     assert "title" in corpo_json or "type" in corpo_json, (
         f"Corpo da resposta em {rota} não segue o contrato Problem Details: {corpo_json}"
