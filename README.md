@@ -118,6 +118,7 @@ O repositório possui pipeline automatizado no GitHub Actions executado a cada P
 | `web-build` | Compilação estática do frontend de produção via Vite (`npm run build`), bloqueada se o lint falhar | `cd apps/web && npm run build`<br>*(ou via contêiner: `docker compose exec web npm run build`)* |
 | `dockerfiles` | Conformidade, boas práticas e segurança dos Dockerfiles com Hadolint | `docker run --rm -v "$PWD:/repo" -w /repo hadolint/hadolint:v2.15.1-alpine hadolint apps/api/Dockerfile apps/web/Dockerfile infra/emulators/Dockerfile seed/Dockerfile` |
 | `compose-smoke` | Subida real do ambiente do zero sem `.env` (`docker compose up -d --build --wait`), validação dos endpoints `/healthz`, proxy Vite, execução e idempotência do seed e regra deny-all do Firestore | `docker compose config`<br>`docker compose up -d --build --wait`<br>`docker compose --profile seed run --rm seed`<br>`docker compose --profile seed run --rm seed --verificar`<br>`docker compose down -v` |
+| `api-testes` | Execução dos testes automatizados com pytest (`apps/api/tests`) dentro do contêiner da API contra os emuladores do Firebase | `docker compose up -d --build --wait`<br>`docker compose --profile seed run --rm seed`<br>`docker compose exec api pytest tests -v`<br>`docker compose down -v` |
 | `ci-ok` | Check agregador estável: consolida todos os jobs e falha se qualquer um falhar, for cancelado ou pulado (único check obrigatório na proteção da `main`) | Avaliado automaticamente no GitHub Actions |
 
 ## Como contribuir

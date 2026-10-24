@@ -34,6 +34,14 @@ from .conftest import (
 )
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Rotas /contratos/{id}, /trabalhadores/{id} e /documentos/{id} inexistentes (Semana 4). "
+        "Atualmente retornam 404 de rota não encontrada do FastAPI em vez do 404 Problem Details "
+        "(RFC 9457, application/problem+json) da camada de autorização."
+    ),
+)
 def test_h19_ca1_t_iso_01_gestor_acessa_recursos_outro_tenant_retorna_404(
     client: TestClient,
     headers_gestor_alfa: dict[str, str],
@@ -48,7 +56,8 @@ def test_h19_ca1_t_iso_01_gestor_acessa_recursos_outro_tenant_retorna_404(
         - GET /trabalhadores/{id_B}
         - GET /documentos/{id_B}
     Então:
-        A API responde HTTP 404 em todos os endpoints, sem expor que o recurso existe
+        A API responde HTTP 404 em todos os endpoints, com payload Problem Details (RFC 9457)
+        oriundo da camada de autorização/guard de tenant, sem expor que o recurso existe
         nem vazar nenhum dado de negócio do Tenant Beta no corpo da resposta.
     """
     recursos_beta = [
@@ -63,6 +72,21 @@ def test_h19_ca1_t_iso_01_gestor_acessa_recursos_outro_tenant_retorna_404(
         assert resposta.status_code == 404, (
             f"Esperado HTTP 404 ao acessar recurso de outro tenant em {rota}, "
             f"mas obteve HTTP {resposta.status_code}."
+        )
+
+        # Valida que o 404 vem da camada de autorização (formato problem+json da RFC 9457/7807)
+        # e não um 404 genérico de rota inexistente do FastAPI
+        assert "application/problem+json" in resposta.headers.get("content-type", ""), (
+            f"Esperado header Content-Type 'application/problem+json' em {rota}, "
+            f"mas obteve '{resposta.headers.get('content-type')}'."
+        )
+        corpo_json = resposta.json()
+        assert corpo_json.get("status") == 404, (
+            f"Esperado campo 'status': 404 no corpo problem+json em {rota}, "
+            f"mas obteve {corpo_json.get('status')}."
+        )
+        assert "title" in corpo_json or "type" in corpo_json, (
+            f"Corpo da resposta em {rota} não segue o contrato Problem Details: {corpo_json}"
         )
 
         corpo_texto = resposta.text.lower()
@@ -210,6 +234,14 @@ def test_h19_ca1_t_iso_04_portaria_consulta_cpf_outro_tenant_retorna_nao_cadastr
     assert "Alexandre Pires Barbosa" not in resposta.text
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Rota GET /trabalhadores/{id} inexistente (Semana 4). "
+        "Atualmente retorna 404 de rota não encontrada do FastAPI em vez do 404 Problem Details "
+        "(RFC 9457, application/problem+json) da camada de autorização."
+    ),
+)
 def test_h19_ca3_t_iso_05_terceirizada_acessa_trabalhador_outra_terceirizada_retorna_404(
     client: TestClient,
     headers_terceirizada_1_alfa: dict[str, str],
@@ -221,7 +253,8 @@ def test_h19_ca3_t_iso_05_terceirizada_acessa_trabalhador_outra_terceirizada_ret
     Quando:
         Faz GET em /trabalhadores/{trb_alfa_y1}, que pertence à Terceirizada 2 (ter_alfa_2).
     Então:
-        A API responde HTTP 404 (isolamento horizontal intra-tenant entre terceirizadas).
+        A API responde HTTP 404 (isolamento horizontal intra-tenant entre terceirizadas),
+        com formato Problem Details (RFC 9457, application/problem+json).
     """
     rota = f"/trabalhadores/{TRB_ALFA_Y1}"
     resposta = client.get(rota, headers=headers_terceirizada_1_alfa)
@@ -229,6 +262,17 @@ def test_h19_ca3_t_iso_05_terceirizada_acessa_trabalhador_outra_terceirizada_ret
     assert resposta.status_code == 404, (
         f"Esperado HTTP 404 no acesso entre terceirizadas distintas em {rota}, "
         f"mas obteve HTTP {resposta.status_code}."
+    )
+    assert "application/problem+json" in resposta.headers.get("content-type", ""), (
+        f"Esperado header Content-Type 'application/problem+json' em {rota}, "
+        f"mas obteve '{resposta.headers.get('content-type')}'."
+    )
+    corpo_json = resposta.json()
+    assert corpo_json.get("status") == 404, (
+        f"Esperado campo 'status': 404 no corpo problem+json em {rota}, mas obteve {corpo_json.get('status')}."
+    )
+    assert "title" in corpo_json or "type" in corpo_json, (
+        f"Corpo da resposta em {rota} não segue o contrato Problem Details: {corpo_json}"
     )
 
 
@@ -267,6 +311,14 @@ def test_h19_ca4_t_iso_06_acesso_direto_firestore_storage_sem_api_rejeitado_deny
     )
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Rota POST /documentos/{id}/url-download inexistente (Semana 4). "
+        "Atualmente retorna 404 de rota não encontrada do FastAPI em vez do 404 Problem Details "
+        "(RFC 9457, application/problem+json) da camada de autorização."
+    ),
+)
 def test_h19_ca1_t_iso_07_gestor_gera_url_download_documento_outro_tenant_retorna_404(
     client: TestClient,
     headers_gestor_alfa: dict[str, str],
@@ -279,7 +331,8 @@ def test_h19_ca1_t_iso_07_gestor_gera_url_download_documento_outro_tenant_retorn
         Tenta gerar link temporário de download (POST /documentos/{id_B}/url-download)
         para um documento armazenado sob o escopo do Tenant Beta (doc_beta_1_aso).
     Então:
-        A API responde HTTP 404, bloqueando a geração de URL assinada para outro tenant.
+        A API responde HTTP 404, bloqueando a geração de URL assinada para outro tenant,
+        com formato Problem Details (RFC 9457, application/problem+json).
     """
     rota = f"/documentos/{DOC_BETA_1_ASO}/url-download"
     resposta = client.post(rota, headers=headers_gestor_alfa)
@@ -287,4 +340,15 @@ def test_h19_ca1_t_iso_07_gestor_gera_url_download_documento_outro_tenant_retorn
     assert resposta.status_code == 404, (
         f"Esperado HTTP 404 ao solicitar URL de documento de outro tenant em {rota}, "
         f"mas obteve HTTP {resposta.status_code}."
+    )
+    assert "application/problem+json" in resposta.headers.get("content-type", ""), (
+        f"Esperado header Content-Type 'application/problem+json' em {rota}, "
+        f"mas obteve '{resposta.headers.get('content-type')}'."
+    )
+    corpo_json = resposta.json()
+    assert corpo_json.get("status") == 404, (
+        f"Esperado campo 'status': 404 no corpo problem+json em {rota}, mas obteve {corpo_json.get('status')}."
+    )
+    assert "title" in corpo_json or "type" in corpo_json, (
+        f"Corpo da resposta em {rota} não segue o contrato Problem Details: {corpo_json}"
     )
