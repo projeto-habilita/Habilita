@@ -289,9 +289,22 @@ def test_h19_ca4_t_iso_06_acesso_direto_firestore_storage_sem_api_rejeitado_deny
         Tanto firestore.rules quanto storage.rules contêm a regra estrita deny-all
         'allow read, write: if false;', impedindo qualquer bypass da camada de autorização.
     """
-    raiz_repo = Path(__file__).resolve().parents[3]
-    arquivo_firestore_rules = raiz_repo / "firestore.rules"
-    arquivo_storage_rules = raiz_repo / "storage.rules"
+    caminhos_busca: list[Path] = [
+        Path("/app"),
+        Path.cwd(),
+    ]
+    parents = Path(__file__).resolve().parents
+    if len(parents) > 3:
+        caminhos_busca.insert(0, parents[3])
+
+    arquivo_firestore_rules = next(
+        (p / "firestore.rules" for p in caminhos_busca if (p / "firestore.rules").is_file()),
+        Path("firestore.rules"),
+    )
+    arquivo_storage_rules = next(
+        (p / "storage.rules" for p in caminhos_busca if (p / "storage.rules").is_file()),
+        Path("storage.rules"),
+    )
 
     assert arquivo_firestore_rules.is_file(), (
         f"Arquivo firestore.rules não encontrado em {arquivo_firestore_rules}"

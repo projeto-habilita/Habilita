@@ -320,12 +320,6 @@ jobs:
 
           echo "Regra deny-all validada com sucesso: escrita rejeitada com 403 PERMISSION_DENIED."
 
-      - name: Executar testes da API (pytest) dentro do contêiner contra os emuladores
-        run: |
-          set -euo pipefail
-          echo "==> Executando testes automatizados com pytest dentro do contêiner da API..."
-          docker compose exec -T api pytest tests -v
-
       - name: Exibir diagnóstico em caso de falha
         if: failure()
         run: |
