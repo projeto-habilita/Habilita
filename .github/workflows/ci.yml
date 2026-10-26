@@ -332,6 +332,43 @@ jobs:
         if: always()
         run: docker compose down -v
 
+  api-testes:
+    name: api-testes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs:
+      - api-qualidade
+      - dockerfiles
+      - seed-qualidade
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Subir ambiente local (emuladores e API)
+        run: docker compose up -d --build --wait --wait-timeout 300
+
+      - name: Popular dados com seed
+        run: docker compose --profile seed run --rm seed
+
+      - name: Executar testes da API com pytest contra os emuladores
+        run: |
+          set -euo pipefail
+          docker compose exec -T api pytest tests -v
+
+      - name: Exibir diagnóstico em caso de falha
+        if: failure()
+        run: |
+          echo "=== docker compose ps ==="
+          docker compose ps
+          echo "=== docker compose logs ==="
+          docker compose logs --no-color
+
+      - name: Derrubar ambiente e limpar volumes
+        if: always()
+        run: docker compose down -v
+
   ci-ok:
     name: ci-ok
     runs-on: ubuntu-24.04
@@ -341,6 +378,7 @@ jobs:
       - segredos
       - higiene
       - api-qualidade
+      - api-testes
       - web-qualidade
       - web-build
       - dockerfiles
