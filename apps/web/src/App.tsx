@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-
+import { LoadingState } from './components/LoadingState'
 // Os três estados que o bloco de saúde pode ter.
 // Estado "vazio" não se aplica aqui: a resposta de /healthz nunca é uma lista.
 // Nas telas com listas (próximas histórias), lembre de tratar o estado vazio também.
@@ -50,7 +50,7 @@ function HealthBlock() {
   return (
     <section aria-live="polite">
       <h2>Estado da API</h2>
-      {state.kind === 'loading' && <p>Carregando…</p>}
+      {state.kind === 'loading' && <LoadingState message="Verificando conexão com a API..." />}
       {state.kind === 'success' && <p>API no ar: {state.status}</p>}
       {state.kind === 'error' && <p role="alert">Erro: {state.message}</p>}
     </section>
