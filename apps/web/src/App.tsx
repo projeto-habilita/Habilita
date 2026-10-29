@@ -58,15 +58,12 @@ function HealthBlock() {
   )
 }
 
-
 function LoginFormPreview() {
   return (
     <section aria-labelledby="login-title">
       <h2 id="login-title">Acesso ao Habilita</h2>
 
-      <p>
-        Informe suas credenciais para acessar a plataforma.
-      </p>
+      <p>Informe suas credenciais para acessar a plataforma.</p>
 
       <form onSubmit={(event) => event.preventDefault()}>
         <FormField
@@ -94,14 +91,10 @@ function LoginFormPreview() {
         </button>
       </form>
 
-      <p>
-        Prévia dos campos acessíveis.
-        A autenticação será integrada na FE-11.
-      </p>
+      <p>Prévia dos campos acessíveis. A autenticação será integrada na FE-11.</p>
     </section>
   )
 }
-
 
 export default function App() {
   return (
