@@ -4,7 +4,7 @@ Especificação:
 - História: H19 (Isolar dados por cliente e papel)
 - Requisito Não Funcional: RNF01 (Autorização por cliente e papel em 100% das rotas)
 - ADR Relacionada: ADR 0002 (Multi-tenant e autorização)
-- Casos de Teste da Estratégia de QA: T-ISO-01 a T-ISO-07
+- Casos de Teste da Estratégia de QA: T-ISO-01 a T-ISO-10
 - Referência: docs/testes/estrategia.md (Seção 5) e seed/README.md (Seção 4)
 
 Nota para o Checkpoint 1 (18/10/2026):
@@ -16,19 +16,23 @@ precisa estar escrito."
 Endpoints previstos para implementação completa na Semana 4 (01/11/2026).
 """
 
-from pathlib import Path
+import os
 from typing import Any
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from .conftest import (
     CPF_TRB_BETA_1,
+    CTR_ALFA_1,
     CTR_BETA_1,
+    DOC_ALFA_1_ASO,
     DOC_BETA_1_ASO,
     TER_ALFA_1,
     TNT_ALFA,
     TNT_BETA,
+    TRB_ALFA_1,
     TRB_ALFA_Y1,
     TRB_BETA_1,
 )
@@ -98,7 +102,7 @@ def test_h19_ca1_t_iso_01_gestor_acessa_recursos_outro_tenant_retorna_404(
 
 
 @pytest.mark.xfail(
-    strict=False,
+    strict=True,
     reason="Endpoints de listagem (H01, H02, H19) previstos para implementação na Semana 4.",
 )
 def test_h19_ca1_t_iso_02_gestor_lista_recursos_nao_enxerga_outro_tenant(
@@ -138,7 +142,7 @@ def test_h19_ca1_t_iso_02_gestor_lista_recursos_nao_enxerga_outro_tenant(
 
 
 @pytest.mark.xfail(
-    strict=False,
+    strict=True,
     reason="Rota POST /contratos prevista para implementação na Semana 4 (ADR 0002).",
 )
 def test_h19_ca5_t_iso_03_injecao_tenant_id_criacao_contrato_isolado_no_tenant_da_claim(
@@ -190,7 +194,7 @@ def test_h19_ca5_t_iso_03_injecao_tenant_id_criacao_contrato_isolado_no_tenant_d
 
 
 @pytest.mark.xfail(
-    strict=False,
+    strict=True,
     reason="Rota POST /liberacoes/consultas prevista para implementação na Semana 4 (ADR 0008).",
 )
 def test_h19_ca1_t_iso_04_portaria_consulta_cpf_outro_tenant_retorna_nao_cadastrado(
@@ -278,51 +282,93 @@ def test_h19_ca3_t_iso_05_terceirizada_acessa_trabalhador_outra_terceirizada_ret
 
 
 def test_h19_ca4_t_iso_06_acesso_direto_firestore_storage_sem_api_rejeitado_deny_all() -> None:
-    """T-ISO-06 (H19.CA4): Regras deny-all bloqueiam acesso direto ao Firestore e Storage.
+    """T-ISO-06 (H19.CA4): Regras deny-all no emulador bloqueiam acesso ao Firestore e Storage.
 
     Dado:
-        O navegador ou cliente Firebase tentando ler ou escrever diretamente
+        O navegador ou cliente externo tentando ler ou escrever diretamente
         no Firestore ou Cloud Storage sem passar pela API FastAPI.
     Quando:
-        As Security Rules são avaliadas.
+        Operações de leitura (GET) e escrita (POST) não autenticadas são executadas
+        diretamente contra os emuladores locais.
     Então:
-        Tanto firestore.rules quanto storage.rules contêm a regra estrita deny-all
-        'allow read, write: if false;', impedindo qualquer bypass da camada de autorização.
+        1. Firestore rejeita leitura não autenticada com HTTP 403 (PERMISSION_DENIED).
+        2. Firestore rejeita escrita não autenticada com HTTP 403 (PERMISSION_DENIED).
+        3. Cloud Storage rejeita leitura não autenticada com HTTP 403.
+        4. Cloud Storage rejeita escrita não autenticada com HTTP 403.
+        Comprova a diretiva deny-all em tempo de execução sem depender de busca de texto.
     """
-    caminhos_busca: list[Path] = [
-        Path("/app"),
-        Path.cwd(),
-    ]
-    parents = Path(__file__).resolve().parents
-    if len(parents) > 3:
-        caminhos_busca.insert(0, parents[3])
-
-    arquivo_firestore_rules = next(
-        (p / "firestore.rules" for p in caminhos_busca if (p / "firestore.rules").is_file()),
-        Path("firestore.rules"),
-    )
-    arquivo_storage_rules = next(
-        (p / "storage.rules" for p in caminhos_busca if (p / "storage.rules").is_file()),
-        Path("storage.rules"),
+    firestore_host = os.getenv("FIRESTORE_EMULATOR_HOST", "127.0.0.1:8080")
+    firestore_base = (
+        firestore_host.rstrip("/") if "://" in firestore_host else f"http://{firestore_host}"
     )
 
-    assert arquivo_firestore_rules.is_file(), (
-        f"Arquivo firestore.rules não encontrado em {arquivo_firestore_rules}"
+    storage_host = (
+        os.getenv("FIREBASE_STORAGE_EMULATOR_HOST")
+        or os.getenv("STORAGE_EMULATOR_HOST")
+        or "127.0.0.1:9199"
     )
-    assert arquivo_storage_rules.is_file(), (
-        f"Arquivo storage.rules não encontrado em {arquivo_storage_rules}"
-    )
+    storage_base = storage_host.rstrip("/") if "://" in storage_host else f"http://{storage_host}"
 
-    conteudo_firestore = arquivo_firestore_rules.read_text(encoding="utf-8")
-    conteudo_storage = arquivo_storage_rules.read_text(encoding="utf-8")
+    project_id = os.getenv("FIREBASE_PROJECT_ID", "demo-habilita")
+    storage_bucket = os.getenv("STORAGE_BUCKET_NAME", f"{project_id}.appspot.com")
 
-    # Verifica que a diretiva deny-all está explicitamente presente
-    assert "allow read, write: if false;" in conteudo_firestore, (
-        "firestore.rules deve conter 'allow read, write: if false;'"
+    probe_doc = "probe_t_iso_06"
+    url_fs_docs = (
+        f"{firestore_base}/v1/projects/{project_id}/databases/(default)/documents/{probe_doc}"
     )
-    assert "allow read, write: if false;" in conteudo_storage, (
-        "storage.rules deve conter 'allow read, write: if false;'"
-    )
+    url_st_file = f"{storage_base}/v0/b/{storage_bucket}/o/{probe_doc}.txt"
+    url_st_upload = f"{storage_base}/v0/b/{storage_bucket}/o?name={probe_doc}.txt"
+
+    try:
+        with httpx.Client(timeout=5.0) as http_client:
+            # 1. Firestore: leitura não autenticada negada
+            resp_fs_read = http_client.get(url_fs_docs)
+            assert resp_fs_read.status_code == 403, (
+                f"Esperado HTTP 403 na leitura do Firestore, obtido {resp_fs_read.status_code}"
+            )
+            fs_read_json = resp_fs_read.json()
+            assert fs_read_json.get("error", {}).get("status") == "PERMISSION_DENIED", (
+                f"Esperado PERMISSION_DENIED no Firestore, obtido: {fs_read_json}"
+            )
+
+            # 2. Firestore: escrita não autenticada negada
+            resp_fs_write = http_client.post(
+                url_fs_docs,
+                json={"fields": {"probe": {"stringValue": "t_iso_06_unauthenticated"}}},
+            )
+            assert resp_fs_write.status_code == 403, (
+                f"Esperado HTTP 403 na escrita do Firestore, obtido {resp_fs_write.status_code}"
+            )
+            fs_write_json = resp_fs_write.json()
+            assert fs_write_json.get("error", {}).get("status") == "PERMISSION_DENIED", (
+                f"Esperado PERMISSION_DENIED no Firestore, obtido: {fs_write_json}"
+            )
+
+            # 3. Storage: leitura não autenticada negada
+            resp_st_read = http_client.get(url_st_file)
+            assert resp_st_read.status_code == 403, (
+                f"Esperado HTTP 403 na leitura do Storage, obtido {resp_st_read.status_code}"
+            )
+            st_read_json = resp_st_read.json()
+            assert "permission" in str(st_read_json).lower(), (
+                f"Resposta do Storage não indica negação de permissão: {st_read_json}"
+            )
+
+            # 4. Storage: escrita não autenticada negada
+            resp_st_write = http_client.post(
+                url_st_upload,
+                content=b"dados_nao_autenticados_t_iso_06",
+                headers={"Content-Type": "text/plain"},
+            )
+            assert resp_st_write.status_code == 403, (
+                f"Esperado HTTP 403 na escrita do Storage, obtido {resp_st_write.status_code}"
+            )
+            st_write_json = resp_st_write.json()
+            assert "permission" in str(st_write_json).lower(), (
+                f"Resposta do Storage não indica negação de permissão: {st_write_json}"
+            )
+    except httpx.ConnectError:
+        pytest.skip("Emuladores locais do Firebase não acessíveis para executar T-ISO-06.")
 
 
 @pytest.mark.xfail(
@@ -367,3 +413,164 @@ def test_h19_ca1_t_iso_07_gestor_gera_url_download_documento_outro_tenant_retorn
     assert "title" in corpo_json or "type" in corpo_json, (
         f"Corpo da resposta em {rota} não segue o contrato Problem Details: {corpo_json}"
     )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Rotas protegidas e middleware de autenticação previstos para Semana 4. "
+        "Atualmente rota inexistente retorna 404 de rota não encontrada em vez de "
+        "401 Problem Details da camada de autenticação."
+    ),
+)
+def test_h19_ca6_t_iso_08_requisicao_sem_token_retorna_401_problem_details(
+    client: TestClient,
+) -> None:
+    """T-ISO-08 (H19.CA6): Requisição a rotas protegidas sem token retorna 401 Problem Details.
+
+    Dado:
+        Um cliente não autenticado (sem cabeçalho Authorization nem token).
+    Quando:
+        Tenta acessar endpoints protegidos de contratos, trabalhadores ou documentos:
+        - GET /contratos/{id}
+        - GET /trabalhadores/{id}
+        - GET /documentos
+    Então:
+        A API responde HTTP 401 Unauthorized com formato Problem Details (RFC 9457,
+        application/problem+json) e status 401 no payload.
+    """
+    rotas_protegidas = [
+        f"/contratos/{CTR_ALFA_1}",
+        f"/trabalhadores/{TRB_ALFA_1}",
+        "/documentos",
+    ]
+
+    for rota in rotas_protegidas:
+        resposta = client.get(rota)  # Requisição sem cabeçalho Authorization
+
+        assert resposta.status_code == 401, (
+            f"Esperado HTTP 401 para requisição sem token em {rota}, "
+            f"mas obteve HTTP {resposta.status_code}."
+        )
+        assert "application/problem+json" in resposta.headers.get("content-type", ""), (
+            f"Esperado Content-Type 'application/problem+json' em {rota}, "
+            f"mas obteve '{resposta.headers.get('content-type')}'."
+        )
+        corpo = resposta.json()
+        assert corpo.get("status") == 401, (
+            f"Esperado status 401 em {rota}, mas obteve {corpo.get('status')}."
+        )
+        assert "title" in corpo or "type" in corpo, (
+            f"Corpo da resposta em {rota} não segue o padrão Problem Details: {corpo}"
+        )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Controle de acesso baseado em papel (RBAC) previsto para Semana 4. "
+        "Atualmente rota inexistente retorna 404 de rota não encontrada em vez de "
+        "403 Problem Details da camada de autorização."
+    ),
+)
+def test_h19_ca6_t_iso_09_papel_inadequado_retorna_403_problem_details(
+    client: TestClient,
+    headers_porteiro_alfa: dict[str, str],
+    headers_terceirizada_1_alfa: dict[str, str],
+) -> None:
+    """T-ISO-09 (H19.CA6): Requisições de usuários com papel não autorizado retornam 403.
+
+    Dado:
+        Usuários autenticados com papéis específicos ('porteiro' ou 'terceirizada').
+    Quando:
+        - Porteiro tenta criar contrato (POST /contratos) ou aprovar documento.
+        - Terceirizada tenta aprovar documento de SST (POST /documentos/{id}/aprovacao).
+    Então:
+        A API responde HTTP 403 Forbidden com formato Problem Details (RFC 9457,
+        application/problem+json), garantindo que violações de RBAC sejam bloqueadas.
+    """
+    # 1. Porteiro tenta criar contrato (ação restrita a Gestor SST)
+    payload_contrato = {
+        "identificador": "CTR-ILLEGAL-01",
+        "terceirizadaId": TER_ALFA_1,
+    }
+    resp_porteiro = client.post(
+        "/contratos",
+        json=payload_contrato,
+        headers=headers_porteiro_alfa,
+    )
+    assert resp_porteiro.status_code == 403, (
+        f"Esperado HTTP 403 para porteiro criando contrato, mas obteve {resp_porteiro.status_code}."
+    )
+    assert "application/problem+json" in resp_porteiro.headers.get("content-type", ""), (
+        f"Esperado application/problem+json em POST /contratos, "
+        f"mas obteve '{resp_porteiro.headers.get('content-type')}'."
+    )
+    assert resp_porteiro.json().get("status") == 403
+
+    # 2. Terceirizada tenta aprovar documento (ação restrita a Gestor SST)
+    resp_terceirizada = client.post(
+        f"/documentos/{DOC_ALFA_1_ASO}/aprovacao",
+        headers=headers_terceirizada_1_alfa,
+    )
+    assert resp_terceirizada.status_code == 403, (
+        f"Esperado HTTP 403 para terceirizada aprovando documento, "
+        f"mas obteve {resp_terceirizada.status_code}."
+    )
+    assert "application/problem+json" in resp_terceirizada.headers.get("content-type", ""), (
+        f"Esperado application/problem+json em aprovação de documento, "
+        f"mas obteve '{resp_terceirizada.headers.get('content-type')}'."
+    )
+    assert resp_terceirizada.json().get("status") == 403
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Rotas e repositórios delimitados por caminho previstos para Semana 4. "
+        "Atualmente rota inexistente retorna 404 de rota não encontrada em vez do "
+        "404 Problem Details da camada de autorização."
+    ),
+)
+def test_h19_ca1_t_iso_10_ids_parecidos_ou_colidentes_entre_tenants_retorna_404(
+    client: TestClient,
+    headers_gestor_alfa: dict[str, str],
+) -> None:
+    """T-ISO-10 (H19.CA1): IDs parecidos, colidentes ou com prefixos similares retornam 404.
+
+    Dado:
+        Um usuário autenticado como Gestor SST do Tenant Alfa (tnt_alfa).
+    Quando:
+        O gestor tenta acessar recursos cujos IDs se assemelham aos de Alfa,
+        colidem em nome simples ou tentam path traversal:
+        - GET /contratos/{id_beta_parecido} (ex.: 'ctr_beta_1' vs 'ctr_alfa_1')
+        - GET /contratos/{id_com_sufixo_ou_prefixo}
+        - GET /contratos/{tentativa_path_traversal}
+    Então:
+        A busca delimitada sob 'tenants/tnt_alfa/...' responde HTTP 404 com formato
+        Problem Details (RFC 9457), garantindo que correspondências parciais,
+        colisões ou prefixos parecidos nunca vazem dados entre tenants.
+    """
+    ids_fronteira = [
+        CTR_BETA_1,
+        f"{CTR_ALFA_1}_beta",
+        f"beta_{CTR_ALFA_1}",
+        f"../tnt_beta/contratos/{CTR_BETA_1}",
+    ]
+
+    for recurso_id in ids_fronteira:
+        rota = f"/contratos/{recurso_id}"
+        resposta = client.get(rota, headers=headers_gestor_alfa)
+
+        assert resposta.status_code == 404, (
+            f"Esperado HTTP 404 para ID fronteira/parecido '{recurso_id}' em {rota}, "
+            f"mas obteve HTTP {resposta.status_code}."
+        )
+        assert "application/problem+json" in resposta.headers.get("content-type", ""), (
+            f"Esperado Content-Type 'application/problem+json' em {rota}, "
+            f"mas obteve '{resposta.headers.get('content-type')}'."
+        )
+        corpo = resposta.json()
+        assert corpo.get("status") == 404
+        assert "title" in corpo or "type" in corpo
+        assert TNT_BETA not in resposta.text.lower(), f"Vazamento de tenantId de B em {rota}!"
