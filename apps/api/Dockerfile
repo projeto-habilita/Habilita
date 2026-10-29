@@ -10,7 +10,7 @@ FROM ghcr.io/astral-sh/uv:0.13.1@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef302
 # base: Python 3.12.15 (Debian 13 "trixie") comum a todos os estágios
 # ---------------------------------------------------------------------
 # python:3.12.15-slim
-FROM python:3.12.15-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS base
+FROM python:3.12.15-slim@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704 AS base
 
 # - sem .pyc (menos lixo) e logs sem buffer (aparecem na hora no `docker logs`)
 # - PORT: porta da API (o Cloud Run também injeta PORT); padrão 8000
