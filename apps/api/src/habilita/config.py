@@ -65,6 +65,32 @@ class Settings(BaseSettings):
                     )
         return self
 
+    # Supabase Storage (Plano Custo Zero)
+    # URL interna da API de Storage (no Compose é http://storage:5000, em prod é a URL do Supabase)
+    storage_url: str = Field(default="http://storage:5000", min_length=1)
+    # URL pública usada pelos clientes/navegador (no Compose é http://127.0.0.1:5000)
+    storage_public_url: str = Field(default="http://127.0.0.1:5000", min_length=1)
+    # Nome do bucket privado de documentos
+    storage_bucket: str = Field(default="documentos", min_length=1)
+    # Chaves JWT do Supabase Storage (valores dummy para desenvolvimento local)
+    supabase_service_key: str = Field(
+        default=(
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+            "eyAgCiAgICAicm9sZSI6ICJzZXJ2aWNlX3JvbGUiLAogICAgImlzcyI6ICJzdXBhYmFzZS1kZW1vIiwK"
+            "ICAgICJpYXQiOiAxNjQxNzY5MjAwLAogICAgImV4cCI6IDE3OTk1MzU2MDAKfQ."
+            "DaYlNEoUrrEn2Ig7tqibS-PHK5vgusbcbo7X36XVt4Q"
+        ),
+        min_length=1,
+    )
+    supabase_anon_key: str = Field(
+        default=(
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+            "eyAgCiAgICAicm9sZSI6ICJhbm9uIiwKICAgICJpc3MiOiAic3VwYWJhc2UtZGVtbyIsCiAgICAiaWF0IjogMTY0MTc2OTIwMCwK"
+            "ICAgICJleHAiOiAxNzk5NTM1NjAwCn0."
+            "dc_X5iR_VP_qT0zsiyj_I_OZ2T9FtRU2BBNWN8Bu4GE"
+        ),
+        min_length=1,
+    )
 
 def get_settings() -> Settings:
     return Settings()
