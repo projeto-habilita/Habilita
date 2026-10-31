@@ -11,5 +11,8 @@ useDefault = true
 description = "Tokens JWT de desenvolvimento local do Supabase Storage"
 paths = [
   '''^\.env\.example$''',
-  '''^docker-compose\.yml$'''
+  '''^docker-compose\.yml$''',
+  '''^\.github/workflows/ci\.yml$''',
+  '''^apps/api/src/habilita/config\.py$''',
+  '''^seed/src/habilita_seed/config\.py$'''
 ]
