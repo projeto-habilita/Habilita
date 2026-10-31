@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     app_env: Literal["local", "ci", "prod"] = "local"
     # Nível de detalhe dos logs (LOG_LEVEL). Logs nunca devem ter dados pessoais.
     log_level: Literal["debug", "info", "warning", "error"] = "info"
-    # Porta em que a API escuta (PORT). O Cloud Run também define PORT.
+    # Porta em que a API escuta (PORT), para o Render e execução local.
     port: int = Field(default=8000, ge=1, le=65535)
     # ID do projeto Firebase (FIREBASE_PROJECT_ID). `demo-` roda só nos emuladores.
     firebase_project_id: str = Field(default="demo-habilita", min_length=1, max_length=64)

@@ -15,11 +15,18 @@ Se uma ADR **aprovada** no `habilita-docs` contradisser este arquivo, a ADR venc
 
 - Web: React + TypeScript `strict` + Vite (SPA) no Firebase Hosting.
 - API: Python 3.12 + FastAPI + Uvicorn, Pydantic v2, pydantic-settings, `uv`, Ruff, mypy estrito, import-linter, pytest.
-- Auth: Firebase Auth com custom claims `tenantId`, `papel`, `terceirizadaId`.
-- Dados: Cloud Firestore (`tenants/{tenantId}/...`), Cloud Storage privado com URL assinada.
-- Execução: Cloud Run (`southamerica-east1`, `min-instances=0`) e Cloud Scheduler.
-- Local: Docker Compose + Firebase Emulator Suite (Auth, Firestore, Storage).
-- CI/CD: GitHub Actions com Workload Identity Federation; imagens no Artifact Registry com tag = SHA do commit.
+- Auth: Firebase Auth (plano Spark gratuito) com custom claims `tenantId`, `papel`, `terceirizadaId`.
+- Dados: Cloud Firestore (plano Spark gratuito, `tenants/{tenantId}/...`) e Supabase Storage (plano gratuito) com URLs assinadas.
+- Execução: Render (plano gratuito, API FastAPI), GitHub Actions (job diário agendado) e UptimeRobot (monitoramento gratuito).
+- Local: Docker Compose com Firebase Emulator Suite (Auth e Firestore) e Supabase Storage local.
+- CI/CD: GitHub Actions; imagens locais e deploy no Render sem custos.
+
+## Regras estritas do Plano Custo Zero (obrigatório para agentes)
+
+- **Não usar GCP pago** (sem Cloud Run, Cloud Storage, Cloud Scheduler, Secret Manager, Artifact Registry ou Workload Identity Federation).
+- **Não pedir nem configurar cartão ou conta de faturamento.**
+- **Nunca ativar o plano Blaze** do Firebase (manter estritamente no plano Spark gratuito).
+- **Nenhum recurso novo em nuvem sem ADR** aprovada no repositório `habilita-docs`.
 
 ## Estrutura do repositório
 
@@ -31,7 +38,7 @@ Se uma ADR **aprovada** no `habilita-docs` contradisser este arquivo, a ADR venc
 │   │   │   ├── config.py      # Configurações tipadas (pydantic-settings)
 │   │   │   ├── main.py        # Fábrica FastAPI e registro de rotas
 │   │   │   └── saude/rotas.py # GET /healthz (contrato OpenAPI)
-│   │   └── Dockerfile         # Alvos: dev (recarga) e prod (enxuta, Cloud Run)
+│   │   └── Dockerfile         # Alvos: dev (recarga) e prod (enxuta, Render e execução local)
 │   └── web/          # Frontend React + TypeScript strict + Vite SPA
 │       ├── src/      # Componentes com estados explícitos (loading, success, error)
 │       └── Dockerfile# Alvo dev (Vite proxy /api -> API)
@@ -97,9 +104,9 @@ Se uma ADR **aprovada** no `habilita-docs` contradisser este arquivo, a ADR venc
 ### Docker e nuvem
 - Imagens enxutas, usuário não-root, sem segredos em imagem ou argumento de build.
 - Tag da imagem = SHA do commit; nunca `latest` em produção.
-- Nenhum recurso de GCP sem ADR ou aprovação do Tech Lead.
+- Nenhum recurso novo em nuvem sem ADR ou aprovação do Tech Lead (Plano Custo Zero: sem GCP pago/Blaze).
 - Até a Semana 4 (01/11) tudo roda localmente; gasto zero.
-- O seed só roda contra emuladores locais (Auth, Firestore e Storage); aborta obrigatoriamente se detectar credenciais reais ou hosts não-locais.
+- O seed só roda contra serviços locais (Auth, Firestore e Supabase Storage local); aborta obrigatoriamente se detectar credenciais reais ou hosts não-locais.
 
 ### Testes
 - O nome do teste referencia o critério: `test_h03_ca2_rejeitar_sem_motivo_retorna_400`.
@@ -122,5 +129,6 @@ Se uma ADR **aprovada** no `habilita-docs` contradisser este arquivo, a ADR venc
 - Ler arquivos de credenciais reais (`.env`, `service-account*.json`, `*.pem`, `*.key`).
 - Fazer push direto na `main` ou `git push --force`.
 - Alterar proteções, rulesets ou secrets do GitHub.
-- Criar recursos de nuvem.
+- Criar recursos de nuvem ou usar serviços pagos.
+- Ativar plano Blaze no Firebase ou cadastrar cartão de crédito/faturamento.
 - Desativar verificações de segurança (pre-commit, Gitleaks, CI).
