@@ -126,7 +126,7 @@ def validar_trava_emulador() -> SeedConfig:
     storage_bucket = env_bucket or f"{project_id}.appspot.com"
 
     # Chave de HMAC do CPF: valor padrão de desenvolvimento se não fornecido.
-    # Em produção, a chave deve vir do Google Cloud Secret Manager conforme ADR 0008.
+    # Em produção, a chave deve vir de variáveis de ambiente protegidas (GitHub Secrets e variáveis do Render).
     env_hmac_key = os.environ.get("CPF_HMAC_KEY", "").strip()
     cpf_hmac_key = env_hmac_key or "demo-cpf-hmac-key-for-emulator-only"
 
