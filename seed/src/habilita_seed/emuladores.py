@@ -419,7 +419,9 @@ def verificar_integridade(config: SeedConfig, data_referencia: date) -> tuple[bo
             claims = user_record.custom_claims or {}
             for k, v in claims_esperadas.items():
                 if claims.get(k) != v:
-                    erros.append(f"Usuário {uid}: claim '{k}' = '{claims.get(k)}', esperado '{v}'.")
+                    erros.append(
+                        f"Usuário {uid}: claim '{k}' = '{claims.get(k)}', esperado '{v}'."
+                    )
             if claims.get("papel") != "terceirizada" and "terceirizadaId" in claims:
                 erros.append(f"Usuário {uid}: não é terceirizada mas possui 'terceirizadaId'.")
         except Exception as exc:
