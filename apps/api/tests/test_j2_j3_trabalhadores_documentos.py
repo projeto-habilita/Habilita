@@ -10,6 +10,7 @@ Cobre:
 - H02.CA7: Tentativa de cadastrar CPF duplicado no mesmo tenant retorna 409
 - H02.CA8: Alocação em contrato inexistente retorna 404
 - H02.CA9: Upload com tipoDocumentoId inexistente no tenant retorna 404
+- H02.CA10: Cálculo dinâmico do semáforo e valores-limite (31=VERDE, 30=AMARELO, -1=VERMELHO)
 - H03.CA1: Analista consulta fila de revisão e gera URL assinada de download
 - H03.CA2: Analista aprova e rejeita documento com justificativa válida
 - H03.CA3: Terceirizada proibida de aprovar documento (403)
@@ -363,3 +364,150 @@ def test_h03_ca7_isolamento_intra_tenant_terceirizada_distinta_retorna_404(
     )
     assert resp.status_code == 404
     assert "application/problem+json" in resp.headers.get("content-type", "")
+
+
+def test_h02_ca10_semaforo_calculo_valor_limite_30_31_dias_e_vencido(
+    client: TestClient,
+    headers_admin_alfa: dict[str, str],
+    headers_terceirizada_1_alfa: dict[str, str],
+    headers_analista_alfa: dict[str, str],
+) -> None:
+    """Valida o cálculo do semáforo: 31 dias = VERDE, 30 dias = AMARELO, vencido = VERMELHO."""
+    import datetime
+
+    hoje = datetime.datetime.now(datetime.UTC).date()
+
+    # Cria trabalhador para testar o semáforo
+    resp_trb = client.post(
+        "/trabalhadores",
+        json={
+            "nome": "Trabalhador Semaforo Teste",
+            "cpf": "111.444.777-35",
+            "terceirizadaId": TER_ALFA_1,
+        },
+        headers=headers_admin_alfa,
+    )
+    assert resp_trb.status_code == 201
+    trb_id = resp_trb.json()["id"]
+
+    # Cria contrato exigindo apenas tip_aso
+    resp_ctr = client.post(
+        "/contratos",
+        json={
+            "identificador": "CTR-SEMAFORO-01",
+            "terceirizadaId": TER_ALFA_1,
+            "dataInicio": "2026-01-01",
+            "dataFim": "2027-12-31",
+        },
+        headers=headers_admin_alfa,
+    )
+    assert resp_ctr.status_code == 201
+    ctr_id = resp_ctr.json()["id"]
+
+    client.put(
+        f"/contratos/{ctr_id}/exigencias",
+        json={"tipoDocumentoIds": ["tip_aso"]},
+        headers=headers_admin_alfa,
+    )
+
+    # 1. Sem documentos: alocação deve ser VERMELHO com pendência AUSENTE
+    resp_aloc = client.post(
+        f"/contratos/{ctr_id}/alocacoes",
+        json={"trabalhadorId": trb_id},
+        headers=headers_admin_alfa,
+    )
+    assert resp_aloc.status_code == 201
+    aloc = resp_aloc.json()
+    assert aloc["semaforo"] == "VERMELHO"
+    assert any(p["motivo"] == "AUSENTE" for p in aloc["pendencias"])
+
+    # 2. Documento com 31 dias até expirar: semáforo deve ser VERDE
+    data_31_dias = (hoje + datetime.timedelta(days=31)).isoformat()
+    resp_doc_31 = client.post(
+        f"/trabalhadores/{trb_id}/documentos",
+        files={"arquivo": ("aso.pdf", io.BytesIO(b"%PDF-1.4 valido"), "application/pdf")},
+        data={"tipoDocumentoId": "tip_aso", "validoAte": data_31_dias},
+        headers=headers_terceirizada_1_alfa,
+    )
+    doc_31_id = resp_doc_31.json()["id"]
+    client.post(f"/documentos/{doc_31_id}/aprovacao", headers=headers_analista_alfa)
+
+    resp_detalhe = client.get(f"/trabalhadores/{trb_id}", headers=headers_admin_alfa)
+    aloc_31 = next(a for a in resp_detalhe.json()["alocacoes"] if a["contratoId"] == ctr_id)
+    assert aloc_31["semaforo"] == "VERDE"
+    assert aloc_31["pendencias"] == []
+    assert aloc_31["proximoVencimento"] == data_31_dias
+
+    # 3. Documento vencido (-1 dia): semáforo deve ser VERMELHO com pendência VENCIDO
+    resp_ctr_venc = client.post(
+        "/contratos",
+        json={
+            "identificador": "CTR-SEMAFORO-VENCIDO",
+            "terceirizadaId": TER_ALFA_1,
+            "dataInicio": "2026-01-01",
+            "dataFim": "2027-12-31",
+        },
+        headers=headers_admin_alfa,
+    )
+    ctr_venc_id = resp_ctr_venc.json()["id"]
+    client.put(
+        f"/contratos/{ctr_venc_id}/exigencias",
+        json={"tipoDocumentoIds": ["tip_nr10"]},
+        headers=headers_admin_alfa,
+    )
+
+    data_ontem = (hoje - datetime.timedelta(days=1)).isoformat()
+    resp_doc_venc = client.post(
+        f"/trabalhadores/{trb_id}/documentos",
+        files={"arquivo": ("nr10.pdf", io.BytesIO(b"%PDF-1.4 vencido"), "application/pdf")},
+        data={"tipoDocumentoId": "tip_nr10", "validoAte": data_ontem},
+        headers=headers_terceirizada_1_alfa,
+    )
+    doc_venc_id = resp_doc_venc.json()["id"]
+    client.post(f"/documentos/{doc_venc_id}/aprovacao", headers=headers_analista_alfa)
+
+    resp_aloc_venc = client.post(
+        f"/contratos/{ctr_venc_id}/alocacoes",
+        json={"trabalhadorId": trb_id},
+        headers=headers_admin_alfa,
+    )
+    assert resp_aloc_venc.status_code == 201
+    assert resp_aloc_venc.json()["semaforo"] == "VERMELHO"
+    assert any(p["motivo"] == "VENCIDO" for p in resp_aloc_venc.json()["pendencias"])
+
+    # 4. Documento com 30 dias até expirar: semáforo deve ser AMARELO
+    resp_ctr_30 = client.post(
+        "/contratos",
+        json={
+            "identificador": "CTR-SEMAFORO-30",
+            "terceirizadaId": TER_ALFA_1,
+            "dataInicio": "2026-01-01",
+            "dataFim": "2027-12-31",
+        },
+        headers=headers_admin_alfa,
+    )
+    ctr_30_id = resp_ctr_30.json()["id"]
+    client.put(
+        f"/contratos/{ctr_30_id}/exigencias",
+        json={"tipoDocumentoIds": ["tip_nr35"]},
+        headers=headers_admin_alfa,
+    )
+
+    data_30_dias = (hoje + datetime.timedelta(days=30)).isoformat()
+    resp_doc_30 = client.post(
+        f"/trabalhadores/{trb_id}/documentos",
+        files={"arquivo": ("nr35.pdf", io.BytesIO(b"%PDF-1.4 a vencer"), "application/pdf")},
+        data={"tipoDocumentoId": "tip_nr35", "validoAte": data_30_dias},
+        headers=headers_terceirizada_1_alfa,
+    )
+    doc_30_id = resp_doc_30.json()["id"]
+    client.post(f"/documentos/{doc_30_id}/aprovacao", headers=headers_analista_alfa)
+
+    resp_aloc_30 = client.post(
+        f"/contratos/{ctr_30_id}/alocacoes",
+        json={"trabalhadorId": trb_id},
+        headers=headers_admin_alfa,
+    )
+    assert resp_aloc_30.status_code == 201
+    assert resp_aloc_30.json()["semaforo"] == "AMARELO"
+    assert resp_aloc_30.json()["pendencias"] == []

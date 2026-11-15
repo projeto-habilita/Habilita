@@ -11,6 +11,7 @@ Cobre os requisitos de negócio, controle de acesso e isolamento multi-tenant:
 - H01.CA8: dataFim anterior a dataInicio rejeitada com 422
 - H01.CA9: Isolamento horizontal de contrato (404)
 - H01.CA10: Isolamento intra-tenant de contrato para terceirizada distinta (404)
+- H01.CA11: CNPJ com dígitos verificadores inválidos rejeitado com 422
 """
 
 from __future__ import annotations
@@ -202,4 +203,18 @@ def test_h01_ca10_isolamento_horizontal_terceirizada_distinta_retorna_404(
     """Terceirizada 2 tenta acessar contrato vinculado exclusivamente à Terceirizada 1 -> 404."""
     resp = client.get(f"/contratos/{CTR_ALFA_1}", headers=headers_terceirizada_2_alfa)
     assert resp.status_code == 404
+    assert "application/problem+json" in resp.headers.get("content-type", "")
+
+
+def test_h01_ca11_cnpj_digitos_invalidos_retorna_422(
+    client: TestClient,
+    headers_admin_alfa: dict[str, str],
+) -> None:
+    """CNPJ com dígitos verificadores matematicamente incorretos é rejeitado com HTTP 422."""
+    payload = {
+        "razaoSocial": "Terceirizada CNPJ Invalido",
+        "cnpj": "12.345.678/0001-00",  # 00 é inválido (deveria ser 95)
+    }
+    resp = client.post("/terceirizadas", json=payload, headers=headers_admin_alfa)
+    assert resp.status_code == 422
     assert "application/problem+json" in resp.headers.get("content-type", "")

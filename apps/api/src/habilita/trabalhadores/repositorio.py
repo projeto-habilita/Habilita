@@ -21,6 +21,7 @@ from habilita.trabalhadores.schemas import (
     Alocacao,
     ArquivoMetadados,
     Documento,
+    Pendencia,
     Trabalhador,
     TrabalhadorDetalhe,
     UrlDownloadResponse,
@@ -163,16 +164,9 @@ class TrabalhadoresRepositorio:
             Documento(**d) for d in docs_map.values() if d.get("trabalhadorId") == trabalhador_id
         ]
 
-        # Alocações do trabalhador
+        # Alocações do trabalhador com semáforo dinâmico (RN-04 a RN-07)
         alocs_trb = [
-            Alocacao(
-                contratoId=ctr_id,
-                trabalhadorId=trabalhador_id,
-                semaforo="VERDE",
-                pendencias=[],
-                calculadoEm="2026-10-23T00:00:00Z",
-            )
-            for ctr_id in dados.get("alocacoes", [])
+            self.calcular_semaforo(ctr_id, trabalhador_id) for ctr_id in dados.get("alocacoes", [])
         ]
 
         return TrabalhadorDetalhe(
@@ -215,20 +209,115 @@ class TrabalhadoresRepositorio:
             ativo=True,
         )
 
+    def calcular_semaforo(
+        self,
+        contrato_id: str,
+        trabalhador_id: str,
+        data_referencia: datetime.date | None = None,
+    ) -> Alocacao:
+        """Calcula dinamicamente o semáforo de SST para uma alocação (RN-04 a RN-07)."""
+        from habilita.cadastros.repositorio import CadastrosRepositorio
+
+        cad_repo = CadastrosRepositorio(tenant_id=self.tenant_id)
+        contrato = cad_repo.obter_contrato(contrato_id)
+
+        hoje = data_referencia or datetime.datetime.now(UTC).date()
+        agora = datetime.datetime.now(UTC).isoformat()
+
+        if not contrato or not contrato.exigencias:
+            return Alocacao(
+                contratoId=contrato_id,
+                trabalhadorId=trabalhador_id,
+                semaforo="VERDE",
+                pendencias=[],
+                calculadoEm=agora,
+                proximoVencimento=None,
+            )
+
+        docs_map = _BANCO_DOCUMENTOS.get(self.tenant_id, {})
+        docs_trb = [
+            d
+            for d in docs_map.values()
+            if d.get("trabalhadorId") == trabalhador_id and d.get("statusRevisao") == "APROVADO"
+        ]
+
+        pendencias: list[Pendencia] = []
+        situacoes: list[str] = []
+        vencimentos_validos: list[str] = []
+
+        for ex in contrato.exigencias:
+            tipo_id = ex.id
+            tipo_nome = ex.nome
+
+            # Filtra documentos aprovados desse tipo
+            docs_tipo = [d for d in docs_trb if d.get("tipoDocumentoId") == tipo_id]
+            if not docs_tipo:
+                pendencias.append(
+                    Pendencia(
+                        tipoDocumentoId=tipo_id,
+                        tipoNome=tipo_nome,
+                        motivo="AUSENTE",
+                    )
+                )
+                situacoes.append("AUSENTE")
+                continue
+
+            # Documento eleito com maior data de validade
+            doc_eleito = max(docs_tipo, key=lambda d: str(d.get("validoAte", "")))
+            valido_ate_str = str(doc_eleito.get("validoAte", ""))
+            try:
+                valido_ate_date = datetime.date.fromisoformat(valido_ate_str)
+                dias = (valido_ate_date - hoje).days
+            except ValueError:
+                dias = -1
+
+            if dias < 0:
+                situacao = "VENCIDO"
+                pendencias.append(
+                    Pendencia(
+                        tipoDocumentoId=tipo_id,
+                        tipoNome=tipo_nome,
+                        motivo="VENCIDO",
+                    )
+                )
+            elif dias <= 30:
+                situacao = "A_VENCER"
+                vencimentos_validos.append(valido_ate_str)
+            else:
+                situacao = "VALIDO"
+                vencimentos_validos.append(valido_ate_str)
+
+            situacoes.append(situacao)
+
+        # Regras de consolidação do semáforo (RN-06):
+        # - VERMELHO se qualquer exigência estiver AUSENTE ou VENCIDO
+        # - AMARELO se todas forem atendidas e pelo menos uma estiver A_VENCER (<= 30 dias)
+        # - VERDE se todas estiverem VALIDO (> 30 dias)
+        if any(s in ("AUSENTE", "VENCIDO") for s in situacoes):
+            semaforo = "VERMELHO"
+        elif any(s == "A_VENCER" for s in situacoes):
+            semaforo = "AMARELO"
+        else:
+            semaforo = "VERDE"
+
+        proximo_vencimento = min(vencimentos_validos) if vencimentos_validos else None
+
+        return Alocacao(
+            contratoId=contrato_id,
+            trabalhadorId=trabalhador_id,
+            semaforo=semaforo,
+            pendencias=pendencias,
+            calculadoEm=agora,
+            proximoVencimento=proximo_vencimento,
+        )
+
     def vincular_alocacao(self, contrato_id: str, trabalhador_id: str) -> Alocacao:
         tenant_map = _BANCO_TRABALHADORES.setdefault(self.tenant_id, {})
         trb = tenant_map.get(trabalhador_id)
         if trb and contrato_id not in trb.get("alocacoes", []):
             trb.setdefault("alocacoes", []).append(contrato_id)
 
-        agora = datetime.datetime.now(UTC).isoformat()
-        return Alocacao(
-            contratoId=contrato_id,
-            trabalhadorId=trabalhador_id,
-            semaforo="VERDE",
-            pendencias=[],
-            calculadoEm=agora,
-        )
+        return self.calcular_semaforo(contrato_id, trabalhador_id)
 
     # -------------------------------------------------------------------------
     # Documentos
