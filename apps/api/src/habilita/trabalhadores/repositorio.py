@@ -174,20 +174,20 @@ class TrabalhadoresRepositorio:
     def obter_trabalhador(
         self, trabalhador_id: str, terceirizada_id_filtro: str | None = None
     ) -> TrabalhadorDetalhe | None:
-        dados: dict[str, Any] | None = None
+        dados_trb: dict[str, Any] | None = None
         if self.db is not None:
             doc_ref = self._tenant_ref().collection("trabalhadores").document(trabalhador_id)
             snap = doc_ref.get()
             if snap.exists:
-                dados = snap.to_dict()
+                dados_trb = snap.to_dict()
 
-        if not dados:
+        if not dados_trb:
             tenant_map = _BANCO_TRABALHADORES.get(self.tenant_id, {})
-            dados = tenant_map.get(trabalhador_id)
+            dados_trb = tenant_map.get(trabalhador_id)
 
-        if not dados:
+        if not dados_trb:
             return None
-        if terceirizada_id_filtro and dados.get("terceirizadaId") != terceirizada_id_filtro:
+        if terceirizada_id_filtro and dados_trb.get("terceirizadaId") != terceirizada_id_filtro:
             return None
 
         # Documentos do trabalhador
@@ -200,11 +200,11 @@ class TrabalhadoresRepositorio:
                 .document(trabalhador_id)
                 .collection("documentos")
             )
-            docs_trb = [
-                self._montar_documento(dados)
-                for d in sub_col.stream()
-                if (dados := d.to_dict()) is not None
-            ]
+            for d in sub_col.stream():
+                doc_snap = d.to_dict()
+                if doc_snap is not None:
+                    docs_trb.append(self._montar_documento(doc_snap))
+
             if not docs_trb:
                 t_docs = (
                     self._tenant_ref()
@@ -212,11 +212,10 @@ class TrabalhadoresRepositorio:
                     .where("trabalhadorId", "==", trabalhador_id)
                     .stream()
                 )
-                docs_trb = [
-                    self._montar_documento(dados)
-                    for d in t_docs
-                    if (dados := d.to_dict()) is not None
-                ]
+                for d in t_docs:
+                    doc_snap = d.to_dict()
+                    if doc_snap is not None:
+                        docs_trb.append(self._montar_documento(doc_snap))
 
         if not docs_trb:
             docs_map = _BANCO_DOCUMENTOS.get(self.tenant_id, {})
@@ -227,7 +226,7 @@ class TrabalhadoresRepositorio:
             ]
 
         # Alocações com semáforo dinâmico
-        alocs_ids = list(dados.get("alocacoes", []))
+        alocs_ids = list(dados_trb.get("alocacoes", []))
         if not alocs_ids and self.tenant_id == "tnt_alfa" and trabalhador_id == "trb_alfa_1":
             alocs_ids = ["ctr_alfa_1"]
         elif not alocs_ids and self.tenant_id == "tnt_beta" and trabalhador_id == "trb_beta_1":
@@ -236,11 +235,11 @@ class TrabalhadoresRepositorio:
         alocs_trb = [self.calcular_semaforo(ctr_id, trabalhador_id) for ctr_id in alocs_ids]
 
         return TrabalhadorDetalhe(
-            id=dados["id"],
-            terceirizadaId=dados["terceirizadaId"],
-            nome=dados["nome"],
-            cpfMascarado=dados["cpfMascarado"],
-            ativo=dados["ativo"],
+            id=dados_trb["id"],
+            terceirizadaId=dados_trb["terceirizadaId"],
+            nome=dados_trb["nome"],
+            cpfMascarado=dados_trb["cpfMascarado"],
+            ativo=dados_trb["ativo"],
             documentos=docs_trb,
             alocacoes=alocs_trb,
         )
@@ -482,7 +481,9 @@ class TrabalhadoresRepositorio:
             if status_revisao:
                 col = col.where("statusRevisao", "==", status_revisao)
             todos = [
-                dados for d in col.order_by("id").stream() if (dados := d.to_dict()) is not None
+                doc_dict
+                for d in col.order_by("id").stream()
+                if (doc_dict := d.to_dict()) is not None
             ]
 
             if not todos:
@@ -490,10 +491,10 @@ class TrabalhadoresRepositorio:
                 if status_revisao:
                     cg = cg.where("statusRevisao", "==", status_revisao)
                 todos = [
-                    dados
+                    doc_dict
                     for d in cg.stream()
                     if d.reference.path.startswith(f"tenants/{self.tenant_id}/")
-                    and (dados := d.to_dict()) is not None
+                    and (doc_dict := d.to_dict()) is not None
                 ]
 
         if not todos:
