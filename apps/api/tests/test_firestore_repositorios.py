@@ -150,3 +150,74 @@ def test_trabalhadores_repositorio_grava_no_firestore() -> None:
     doc_aprovado = repo.aprovar_documento(doc.id)
     assert doc_aprovado.statusRevisao == "APROVADO"
     mock_doc_col.document.return_value.update.assert_called_once()
+
+
+def test_trabalhadores_repositorio_compatibilidade_seed_e_isolamento_tenant() -> None:
+    """Valida tolerância a campos extras do seed e isolamento por tenant no collection group."""
+    mock_db = MagicMock()
+    mock_tenant_doc = MagicMock()
+    mock_db.collection.return_value.document.return_value = mock_tenant_doc
+
+    mock_doc_col = MagicMock()
+    mock_tenant_doc.collection.return_value = mock_doc_col
+
+    # Documento não existe na coleção direta do tenant
+    mock_direct_snap = MagicMock()
+    mock_direct_snap.exists = False
+    mock_doc_col.document.return_value.get.return_value = mock_direct_snap
+
+    # 1. Simula collection group retornando documento de outro tenant
+    doc_outro_tenant = MagicMock()
+    doc_outro_tenant.reference.path = (
+        "tenants/tnt_outro/trabalhadores/trb_outro/documentos/doc_outro"
+    )
+    doc_outro_tenant.to_dict.return_value = {
+        "id": "doc_outro",
+        "trabalhadorId": "trb_outro",
+        "tipoDocumentoId": "tdoc_aso",
+        "validoAte": "2027-01-01",
+        "statusRevisao": "PENDENTE",
+        "enviadoEm": "2026-10-20T10:00:00Z",
+        "arquivo": {
+            "caminho": "tenants/tnt_outro/trabalhadores/trb_outro/documentos/doc_outro/file.pdf",
+            "contentType": "application/pdf",
+            "tamanhoBytes": 1024,
+            "sha256": "b" * 64,
+        },
+        "revisadoPor": "uid_admin",
+        "enviadoPor": "uid_terc",
+    }
+    cg_stream = mock_db.collection_group.return_value.where.return_value.limit.return_value.stream
+    cg_stream.return_value = [doc_outro_tenant]
+
+    repo = TrabalhadoresRepositorio(tenant_id="tnt_meu", db=mock_db)
+    # Deve retornar None pois pertence ao tnt_outro
+    assert repo.obter_documento("doc_outro") is None
+
+    # 2. Simula collection group retornando documento do mesmo tenant com campos do seed
+    doc_meu_tenant = MagicMock()
+    doc_meu_tenant.reference.path = "tenants/tnt_meu/trabalhadores/trb_meu/documentos/doc_meu"
+    doc_meu_tenant.to_dict.return_value = {
+        "id": "doc_meu",
+        "trabalhadorId": "trb_meu",
+        "tipoDocumentoId": "tdoc_aso",
+        "validoAte": "2027-01-01",
+        "statusRevisao": "PENDENTE",
+        "enviadoEm": "2026-10-20T10:00:00Z",
+        "arquivo": {
+            "caminho": "tenants/tnt_meu/trabalhadores/trb_meu/documentos/doc_meu/file.pdf",
+            "contentType": "application/pdf",
+            "tamanhoBytes": 1024,
+            "sha256": "c" * 64,
+        },
+        "revisadoPor": "uid_admin",
+        "enviadoPor": "uid_terc",
+    }
+    cg_stream.return_value = [doc_meu_tenant]
+
+    doc_obtido = repo.obter_documento("doc_meu")
+    assert doc_obtido is not None
+    assert doc_obtido.id == "doc_meu"
+    assert doc_obtido.statusRevisao == "PENDENTE"
+    assert doc_obtido.arquivo is not None
+    assert doc_obtido.arquivo.sha256 == "c" * 64

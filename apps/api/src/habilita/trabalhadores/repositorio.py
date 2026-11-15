@@ -200,7 +200,11 @@ class TrabalhadoresRepositorio:
                 .document(trabalhador_id)
                 .collection("documentos")
             )
-            docs_trb = [Documento(**d.to_dict()) for d in sub_col.stream()]
+            docs_trb = [
+                self._montar_documento(dados)
+                for d in sub_col.stream()
+                if (dados := d.to_dict()) is not None
+            ]
             if not docs_trb:
                 t_docs = (
                     self._tenant_ref()
@@ -208,12 +212,16 @@ class TrabalhadoresRepositorio:
                     .where("trabalhadorId", "==", trabalhador_id)
                     .stream()
                 )
-                docs_trb = [Documento(**d.to_dict()) for d in t_docs]
+                docs_trb = [
+                    self._montar_documento(dados)
+                    for d in t_docs
+                    if (dados := d.to_dict()) is not None
+                ]
 
         if not docs_trb:
             docs_map = _BANCO_DOCUMENTOS.get(self.tenant_id, {})
             docs_trb = [
-                Documento(**d)
+                self._montar_documento(d)
                 for d in docs_map.values()
                 if d.get("trabalhadorId") == trabalhador_id
             ]
@@ -431,6 +439,33 @@ class TrabalhadoresRepositorio:
 
         return self.calcular_semaforo(contrato_id, trabalhador_id)
 
+    @staticmethod
+    def _montar_documento(dados: dict[str, Any]) -> Documento:
+        arquivo_obj: ArquivoMetadados | None = None
+        arquivo_dados = dados.get("arquivo")
+        if isinstance(arquivo_dados, dict):
+            arquivo_obj = ArquivoMetadados(
+                contentType=arquivo_dados.get("contentType", "application/pdf"),
+                tamanhoBytes=arquivo_dados.get("tamanhoBytes", 1),
+                sha256=arquivo_dados.get("sha256", "0" * 64),
+            )
+        elif isinstance(arquivo_dados, ArquivoMetadados):
+            arquivo_obj = arquivo_dados
+
+        return Documento(
+            id=dados["id"],
+            trabalhadorId=dados["trabalhadorId"],
+            tipoDocumentoId=dados["tipoDocumentoId"],
+            validoAte=dados["validoAte"],
+            statusRevisao=dados["statusRevisao"],
+            enviadoEm=dados.get("enviadoEm", datetime.datetime.now(UTC).isoformat()),
+            dataEmissao=dados.get("dataEmissao"),
+            revisadoEm=dados.get("revisadoEm"),
+            motivoRejeicao=dados.get("motivoRejeicao"),
+            situacaoValidade=dados.get("situacaoValidade"),
+            arquivo=arquivo_obj,
+        )
+
     # -------------------------------------------------------------------------
     # Documentos
     # -------------------------------------------------------------------------
@@ -454,7 +489,12 @@ class TrabalhadoresRepositorio:
                 cg = self.db.collection_group("documentos")
                 if status_revisao:
                     cg = cg.where("statusRevisao", "==", status_revisao)
-                todos = [dados for d in cg.stream() if (dados := d.to_dict()) is not None]
+                todos = [
+                    dados
+                    for d in cg.stream()
+                    if d.reference.path.startswith(f"tenants/{self.tenant_id}/")
+                    and (dados := d.to_dict()) is not None
+                ]
 
         if not todos:
             docs_map = _BANCO_DOCUMENTOS.setdefault(self.tenant_id, {})
@@ -481,7 +521,7 @@ class TrabalhadoresRepositorio:
         itens_fatia = todos[inicio : inicio + limite]
         proximo_cursor = itens_fatia[-1]["id"] if inicio + limite < len(todos) else None
 
-        resultado = [Documento(**d) for d in itens_fatia]
+        resultado = [self._montar_documento(d) for d in itens_fatia]
         return resultado, proximo_cursor
 
     def obter_documento(
@@ -498,12 +538,13 @@ class TrabalhadoresRepositorio:
                 cg = (
                     self.db.collection_group("documentos")
                     .where("id", "==", documento_id)
-                    .limit(1)
+                    .limit(5)
                     .stream()
                 )
                 for d in cg:
-                    dados = d.to_dict()
-                    break
+                    if d.reference.path.startswith(f"tenants/{self.tenant_id}/"):
+                        dados = d.to_dict()
+                        break
 
         if not dados:
             docs_map = _BANCO_DOCUMENTOS.get(self.tenant_id, {})
@@ -517,7 +558,7 @@ class TrabalhadoresRepositorio:
             if not trb or trb.terceirizadaId != terceirizada_id_filtro:
                 return None
 
-        return Documento(**dados)
+        return self._montar_documento(dados)
 
     def criar_documento(
         self,
@@ -552,7 +593,7 @@ class TrabalhadoresRepositorio:
         docs_map = _BANCO_DOCUMENTOS.setdefault(self.tenant_id, {})
         docs_map[doc_id] = registro
 
-        return Documento(**registro)
+        return self._montar_documento(registro)
 
     def aprovar_documento(self, documento_id: str) -> Documento:
         agora = datetime.datetime.now(UTC).isoformat()
@@ -589,7 +630,7 @@ class TrabalhadoresRepositorio:
 
         doc_dict = doc.model_dump()
         doc_dict.update(atualizacao)
-        return Documento(**doc_dict)
+        return self._montar_documento(doc_dict)
 
     def rejeitar_documento(self, documento_id: str, motivo: str) -> Documento:
         agora = datetime.datetime.now(UTC).isoformat()
@@ -626,7 +667,7 @@ class TrabalhadoresRepositorio:
 
         doc_dict = doc.model_dump()
         doc_dict.update(atualizacao)
-        return Documento(**doc_dict)
+        return self._montar_documento(doc_dict)
 
     def gerar_url_download(
         self, documento_id: str, terceirizada_id_filtro: str | None = None
