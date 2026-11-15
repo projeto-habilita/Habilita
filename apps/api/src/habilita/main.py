@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable
 
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from habilita.cadastros.rotas import router as cadastros_router
@@ -22,11 +23,19 @@ from habilita.trabalhadores.rotas import router as trabalhadores_router
 
 def create_app() -> FastAPI:
     # Lê e valida a configuração já na inicialização: se for inválida, a API não sobe.
-    get_settings()
+    settings = get_settings()
     app = FastAPI(
         title="Habilita API",
         version="0.2.0",
         description="API de conformidade documental de SST multi-tenant",
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "If-Match"],
     )
 
     # Middleware global para X-Request-Id (RFC e rastreabilidade)
