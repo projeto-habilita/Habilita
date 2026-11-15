@@ -1,0 +1,88 @@
+"""Gerenciamento de conexão com o Cloud Firestore.
+
+Compatível com o Firebase Emulator Suite local e produção GCP.
+Conforme AGENTS.md e ADR 0002/0010:
+- Conecta aos emuladores se FIRESTORE_EMULATOR_HOST estiver presente.
+- Utiliza credenciais anônimas em desenvolvimento local.
+- Fallback gracioso para modo de testes rápidos se o banco não estiver disponível.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+
+import firebase_admin  # type: ignore[import-untyped]
+import google.auth.credentials
+from firebase_admin import credentials, firestore
+from google.cloud.firestore import Client as FirestoreClient
+
+from habilita.config import get_settings
+
+logger = logging.getLogger(__name__)
+
+_firestore_client: FirestoreClient | None = None
+_inicializacao_tentada: bool = False
+
+
+class EmulatorCredentials(credentials.Base):  # type: ignore[misc]
+    """Credencial anônima para conexão exclusiva com emuladores locais."""
+
+    def get_credential(self) -> google.auth.credentials.Credentials:
+        return google.auth.credentials.AnonymousCredentials()  # type: ignore[no-untyped-call]
+
+
+def obter_firebase_app() -> firebase_admin.App:
+    """Inicializa ou retorna a aplicação Firebase Admin padrão."""
+    try:
+        return firebase_admin.get_app()
+    except ValueError:
+        settings = get_settings()
+        if os.getenv("FIRESTORE_EMULATOR_HOST") or os.getenv("FIREBASE_AUTH_EMULATOR_HOST"):
+            return firebase_admin.initialize_app(
+                credential=EmulatorCredentials(),
+                options={"projectId": settings.firebase_project_id},
+            )
+        return firebase_admin.initialize_app(
+            options={"projectId": settings.firebase_project_id},
+        )
+
+
+def obter_firestore_client() -> FirestoreClient | None:
+    """Retorna a instância do cliente Firestore ou None se emuladores/GCP indisponíveis."""
+    global _firestore_client, _inicializacao_tentada
+
+    if _firestore_client is not None:
+        return _firestore_client
+
+    if _inicializacao_tentada and _firestore_client is None:
+        return None
+
+    _inicializacao_tentada = True
+
+    # Se estamos explicitamente sem emuladores e sem credenciais, não inicializa cliente remoto
+    emulator_host = os.getenv("FIRESTORE_EMULATOR_HOST")
+    google_creds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+
+    if not emulator_host and not google_creds and os.getenv("APP_ENV") != "prod":
+        logger.debug("FIRESTORE_EMULATOR_HOST não definido. Operando em modo de memória local.")
+        return None
+
+    try:
+        app = obter_firebase_app()
+        client: FirestoreClient = firestore.client(app=app)
+        _firestore_client = client
+        logger.info("Cliente Firestore inicializado com sucesso (emulator=%s).", emulator_host)
+        return _firestore_client
+    except Exception as exc:
+        logger.warning(
+            "Não foi possível conectar ao Firestore (%s). Usando fallback em memória.", exc
+        )
+        return None
+
+
+def resetar_cliente_firestore_para_testes() -> None:
+    """Permite redefinir o cliente durante testes."""
+    global _firestore_client, _inicializacao_tentada
+    _firestore_client = None
+    _inicializacao_tentada = False

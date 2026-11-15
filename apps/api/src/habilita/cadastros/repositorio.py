@@ -1,15 +1,19 @@
-"""Repositório de dados para a Jornada J1 com isolamento estrito por tenant.
+"""Repositório de dados para J1 com persistência no Firestore e isolamento estrito por tenant.
 
 Conforme a ADR 0002 e o AGENTS.md:
 - O repositório recebe o tenantId no construtor.
-- Nenhuma operação pode acessar dados fora do tenant do construtor.
-- Suporta dados do seed determinístico e novas criações.
+- Nenhuma operação pode acessar dados fora do tenant do construtor (tenants/{tenantId}/...).
+- Grava diretamente no Firestore quando disponível (emuladores/produção).
+- Mantém fallback para memória determinística em testes unitários offline.
 """
 
 from __future__ import annotations
 
+import datetime
 import uuid
 from typing import Any
+
+from google.cloud.firestore import Client as FirestoreClient
 
 from habilita.cadastros.schemas import (
     Contrato,
@@ -19,9 +23,11 @@ from habilita.cadastros.schemas import (
     Terceirizada,
     TipoDocumento,
 )
+from habilita.comum.firestore import obter_firestore_client
 
-# Armazenamento determinístico compartilhado em memória indexado por tenantId
-# Compatível com os dados do seed (tnt_alfa e tnt_beta)
+UTC = getattr(datetime, "UTC", datetime.timezone.utc)  # noqa: UP017
+
+# Armazenamento determinístico compartilhado em memória indexado por tenantId (fallback offline)
 _BANCO_TERCEIRIZADAS: dict[str, dict[str, dict[str, Any]]] = {
     "tnt_alfa": {
         "ter_alfa_1": {
@@ -106,10 +112,16 @@ _BANCO_CONTRATOS: dict[str, dict[str, dict[str, Any]]] = {
 
 
 class CadastrosRepositorio:
-    """Repositório de dados com escopo estrito de tenant."""
+    """Repositório de cadastros com escopo estrito de tenant e persistência em Firestore."""
 
-    def __init__(self, tenant_id: str) -> None:
+    def __init__(self, tenant_id: str, db: FirestoreClient | None = None) -> None:
         self.tenant_id = tenant_id
+        self.db = db if db is not None else obter_firestore_client()
+
+    def _tenant_ref(self) -> Any:
+        if self.db is None:
+            return None
+        return self.db.collection("tenants").document(self.tenant_id)
 
     # -------------------------------------------------------------------------
     # Terceirizadas
@@ -117,8 +129,13 @@ class CadastrosRepositorio:
     def listar_terceirizadas(
         self, limite: int = 20, cursor: str | None = None
     ) -> tuple[list[Terceirizada], str | None]:
-        tenant_map = _BANCO_TERCEIRIZADAS.setdefault(self.tenant_id, {})
-        todos = sorted(tenant_map.values(), key=lambda t: t["id"])
+        if self.db is not None:
+            col = self._tenant_ref().collection("terceirizadas")
+            query = col.order_by("id")
+            todos = [d.to_dict() for d in query.stream()]
+        else:
+            tenant_map = _BANCO_TERCEIRIZADAS.setdefault(self.tenant_id, {})
+            todos = sorted(tenant_map.values(), key=lambda t: str(t["id"]))
 
         inicio = 0
         if cursor:
@@ -130,63 +147,130 @@ class CadastrosRepositorio:
         itens_fatia = todos[inicio : inicio + limite]
         proximo_cursor = itens_fatia[-1]["id"] if inicio + limite < len(todos) else None
 
-        resultado = [Terceirizada(**t) for t in itens_fatia]
+        resultado = [
+            Terceirizada(
+                id=t["id"],
+                razaoSocial=t["razaoSocial"],
+                cnpj=t["cnpj"],
+                ativa=bool(t.get("ativa", True)),
+            )
+            for t in itens_fatia
+        ]
         return resultado, proximo_cursor
 
     def obter_terceirizada(self, terceirizada_id: str) -> Terceirizada | None:
-        tenant_map = _BANCO_TERCEIRIZADAS.get(self.tenant_id, {})
-        dados = tenant_map.get(terceirizada_id)
+        if self.db is not None:
+            doc_ref = self._tenant_ref().collection("terceirizadas").document(terceirizada_id)
+            snap = doc_ref.get()
+            if not snap.exists:
+                return None
+            dados = snap.to_dict()
+        else:
+            tenant_map = _BANCO_TERCEIRIZADAS.get(self.tenant_id, {})
+            dados = tenant_map.get(terceirizada_id)
+
         if not dados:
             return None
-        return Terceirizada(**dados)
+        return Terceirizada(
+            id=dados["id"],
+            razaoSocial=dados["razaoSocial"],
+            cnpj=dados["cnpj"],
+            ativa=bool(dados.get("ativa", True)),
+        )
 
     def criar_terceirizada(self, nova: NovaTerceirizada) -> Terceirizada:
-        tenant_map = _BANCO_TERCEIRIZADAS.setdefault(self.tenant_id, {})
         ter_id = f"ter_{uuid.uuid4().hex[:8]}"
         registro = {
             "id": ter_id,
             "razaoSocial": nova.razaoSocial,
             "cnpj": nova.cnpj,
             "ativa": True,
+            "criadoEm": datetime.datetime.now(UTC).isoformat(),
         }
-        tenant_map[ter_id] = registro
-        return Terceirizada(**registro)
+
+        if self.db is not None:
+            self._tenant_ref().collection("terceirizadas").document(ter_id).set(registro)
+        else:
+            tenant_map = _BANCO_TERCEIRIZADAS.setdefault(self.tenant_id, {})
+            tenant_map[ter_id] = registro
+
+        return Terceirizada(
+            id=ter_id,
+            razaoSocial=nova.razaoSocial,
+            cnpj=nova.cnpj,
+            ativa=True,
+        )
 
     # -------------------------------------------------------------------------
     # Tipos de Documento
     # -------------------------------------------------------------------------
     def listar_tipos_documento(self) -> list[TipoDocumento]:
-        tenant_map = _BANCO_TIPOS_DOCUMENTO.setdefault(self.tenant_id, {})
-        todos = sorted(tenant_map.values(), key=lambda t: t["nome"])
-        return [TipoDocumento(**td) for td in todos]
+        if self.db is not None:
+            col = self._tenant_ref().collection("tiposDocumento")
+            todos = [d.to_dict() for d in col.order_by("nome").stream()]
+        else:
+            tenant_map = _BANCO_TIPOS_DOCUMENTO.setdefault(self.tenant_id, {})
+            todos = sorted(tenant_map.values(), key=lambda t: str(t["nome"]))
+
+        return [
+            TipoDocumento(
+                id=td["id"],
+                nome=td["nome"],
+                validadeMeses=int(td["validadeMeses"]),
+            )
+            for td in todos
+        ]
 
     def obter_tipo_documento(self, tipo_id: str) -> TipoDocumento | None:
-        tenant_map = _BANCO_TIPOS_DOCUMENTO.get(self.tenant_id, {})
-        dados = tenant_map.get(tipo_id)
+        if self.db is not None:
+            doc_ref = self._tenant_ref().collection("tiposDocumento").document(tipo_id)
+            snap = doc_ref.get()
+            if not snap.exists:
+                return None
+            dados = snap.to_dict()
+        else:
+            tenant_map = _BANCO_TIPOS_DOCUMENTO.get(self.tenant_id, {})
+            dados = tenant_map.get(tipo_id)
+
         if not dados:
             return None
-        return TipoDocumento(**dados)
+        return TipoDocumento(
+            id=dados["id"],
+            nome=dados["nome"],
+            validadeMeses=int(dados["validadeMeses"]),
+        )
 
     def criar_tipo_documento(self, novo: NovoTipoDocumento) -> TipoDocumento:
-        tenant_map = _BANCO_TIPOS_DOCUMENTO.setdefault(self.tenant_id, {})
         tipo_id = f"tip_{uuid.uuid4().hex[:8]}"
         registro = {
             "id": tipo_id,
             "nome": novo.nome,
             "validadeMeses": novo.validadeMeses,
+            "ativo": True,
+            "criadoEm": datetime.datetime.now(UTC).isoformat(),
         }
-        tenant_map[tipo_id] = registro
-        return TipoDocumento(**registro)
+
+        if self.db is not None:
+            self._tenant_ref().collection("tiposDocumento").document(tipo_id).set(registro)
+        else:
+            tenant_map = _BANCO_TIPOS_DOCUMENTO.setdefault(self.tenant_id, {})
+            tenant_map[tipo_id] = registro
+
+        return TipoDocumento(
+            id=tipo_id,
+            nome=novo.nome,
+            validadeMeses=novo.validadeMeses,
+        )
 
     # -------------------------------------------------------------------------
     # Contratos
     # -------------------------------------------------------------------------
     def _montar_contrato(self, dados: dict[str, Any]) -> Contrato:
-        tipos_map = _BANCO_TIPOS_DOCUMENTO.get(self.tenant_id, {})
         exigencias_obj: list[TipoDocumento] = []
         for tid in dados.get("exigencias", []):
-            if tid in tipos_map:
-                exigencias_obj.append(TipoDocumento(**tipos_map[tid]))
+            tipo = self.obter_tipo_documento(tid)
+            if tipo:
+                exigencias_obj.append(tipo)
 
         return Contrato(
             id=dados["id"],
@@ -205,11 +289,18 @@ class CadastrosRepositorio:
         limite: int = 20,
         cursor: str | None = None,
     ) -> tuple[list[Contrato], str | None]:
-        tenant_map = _BANCO_CONTRATOS.setdefault(self.tenant_id, {})
-        todos = sorted(tenant_map.values(), key=lambda c: c["id"])
-
-        if terceirizada_id_filtro:
-            todos = [c for c in todos if c["terceirizadaId"] == terceirizada_id_filtro]
+        if self.db is not None:
+            col = self._tenant_ref().collection("contratos")
+            if terceirizada_id_filtro:
+                query = col.where("terceirizadaId", "==", terceirizada_id_filtro).order_by("id")
+            else:
+                query = col.order_by("id")
+            todos = [d.to_dict() for d in query.stream()]
+        else:
+            tenant_map = _BANCO_CONTRATOS.setdefault(self.tenant_id, {})
+            todos = sorted(tenant_map.values(), key=lambda c: str(c["id"]))
+            if terceirizada_id_filtro:
+                todos = [c for c in todos if c["terceirizadaId"] == terceirizada_id_filtro]
 
         inicio = 0
         if cursor:
@@ -227,16 +318,27 @@ class CadastrosRepositorio:
     def obter_contrato(
         self, contrato_id: str, terceirizada_id_filtro: str | None = None
     ) -> Contrato | None:
+        if self.db is not None:
+            doc_ref = self._tenant_ref().collection("contratos").document(contrato_id)
+            snap = doc_ref.get()
+            if not snap.exists:
+                return None
+            dados = snap.to_dict()
+            if not dados:
+                return None
+            if terceirizada_id_filtro and dados.get("terceirizadaId") != terceirizada_id_filtro:
+                return None
+            return self._montar_contrato(dados)
+
         tenant_map = _BANCO_CONTRATOS.get(self.tenant_id, {})
-        dados = tenant_map.get(contrato_id)
-        if not dados:
+        dados_mem = tenant_map.get(contrato_id)
+        if not dados_mem:
             return None
-        if terceirizada_id_filtro and dados["terceirizadaId"] != terceirizada_id_filtro:
+        if terceirizada_id_filtro and dados_mem["terceirizadaId"] != terceirizada_id_filtro:
             return None
-        return self._montar_contrato(dados)
+        return self._montar_contrato(dados_mem)
 
     def criar_contrato(self, novo: NovoContrato) -> Contrato:
-        tenant_map = _BANCO_CONTRATOS.setdefault(self.tenant_id, {})
         ctr_id = f"ctr_{uuid.uuid4().hex[:8]}"
         registro = {
             "id": ctr_id,
@@ -247,18 +349,41 @@ class CadastrosRepositorio:
             "vigente": True,
             "versaoMatriz": 0,
             "exigencias": [],
+            "criadoEm": datetime.datetime.now(UTC).isoformat(),
         }
-        tenant_map[ctr_id] = registro
+
+        if self.db is not None:
+            self._tenant_ref().collection("contratos").document(ctr_id).set(registro)
+        else:
+            tenant_map = _BANCO_CONTRATOS.setdefault(self.tenant_id, {})
+            tenant_map[ctr_id] = registro
+
         return self._montar_contrato(registro)
 
     def substituir_exigencias(
         self, contrato_id: str, tipo_documento_ids: list[str]
     ) -> Contrato | None:
+        if self.db is not None:
+            doc_ref = self._tenant_ref().collection("contratos").document(contrato_id)
+            snap = doc_ref.get()
+            if not snap.exists:
+                return None
+            dados = snap.to_dict()
+            if not dados:
+                return None
+
+            novas_exigencias = list(dict.fromkeys(tipo_documento_ids))
+            nova_versao = int(dados.get("versaoMatriz", 0)) + 1
+            doc_ref.update({"exigencias": novas_exigencias, "versaoMatriz": nova_versao})
+            dados["exigencias"] = novas_exigencias
+            dados["versaoMatriz"] = nova_versao
+            return self._montar_contrato(dados)
+
         tenant_map = _BANCO_CONTRATOS.get(self.tenant_id, {})
-        dados = tenant_map.get(contrato_id)
-        if not dados:
+        dados_mem = tenant_map.get(contrato_id)
+        if not dados_mem:
             return None
 
-        dados["exigencias"] = list(dict.fromkeys(tipo_documento_ids))
-        dados["versaoMatriz"] = dados.get("versaoMatriz", 0) + 1
-        return self._montar_contrato(dados)
+        dados_mem["exigencias"] = list(dict.fromkeys(tipo_documento_ids))
+        dados_mem["versaoMatriz"] = dados_mem.get("versaoMatriz", 0) + 1
+        return self._montar_contrato(dados_mem)

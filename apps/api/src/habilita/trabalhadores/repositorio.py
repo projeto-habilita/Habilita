@@ -1,9 +1,10 @@
-"""Repositório de dados para Trabalhadores e Documentos (J2 e J3).
+"""Repositório de dados para J2 e J3 com persistência no Cloud Firestore.
 
 Conforme a ADR 0002 e AGENTS.md:
-- Escopo restrito ao tenantId injetado no construtor.
+- Escopo restrito ao tenantId injetado no construtor (tenants/{tenantId}/...).
 - Controle de acesso intra-tenant para terceirizadas.
-- Integração determinística compatível com o seed.
+- Integração direta com Firestore quando disponível (emuladores/produção).
+- Mantém fallback para memória determinística em testes unitários offline.
 """
 
 from __future__ import annotations
@@ -15,7 +16,11 @@ import re
 import uuid
 from typing import Any
 
+from google.cloud.firestore import Client as FirestoreClient
+
+from habilita.cadastros.repositorio import CadastrosRepositorio
 from habilita.comum.erros import conflito, recurso_nao_encontrado
+from habilita.comum.firestore import obter_firestore_client
 from habilita.config import get_settings
 from habilita.trabalhadores.schemas import (
     Alocacao,
@@ -106,10 +111,16 @@ _BANCO_DOCUMENTOS: dict[str, dict[str, dict[str, Any]]] = {
 
 
 class TrabalhadoresRepositorio:
-    """Repositório isolado por tenant."""
+    """Repositório isolado por tenant com persistência no Firestore."""
 
-    def __init__(self, tenant_id: str) -> None:
+    def __init__(self, tenant_id: str, db: FirestoreClient | None = None) -> None:
         self.tenant_id = tenant_id
+        self.db = db if db is not None else obter_firestore_client()
+
+    def _tenant_ref(self) -> Any:
+        if self.db is None:
+            return None
+        return self.db.collection("tenants").document(self.tenant_id)
 
     # -------------------------------------------------------------------------
     # Trabalhadores
@@ -120,11 +131,18 @@ class TrabalhadoresRepositorio:
         limite: int = 20,
         cursor: str | None = None,
     ) -> tuple[list[Trabalhador], str | None]:
-        tenant_map = _BANCO_TRABALHADORES.setdefault(self.tenant_id, {})
-        todos = sorted(tenant_map.values(), key=lambda t: t["id"])
-
-        if terceirizada_id_filtro:
-            todos = [t for t in todos if t["terceirizadaId"] == terceirizada_id_filtro]
+        if self.db is not None:
+            col = self._tenant_ref().collection("trabalhadores")
+            if terceirizada_id_filtro:
+                query = col.where("terceirizadaId", "==", terceirizada_id_filtro).order_by("id")
+            else:
+                query = col.order_by("id")
+            todos = [d.to_dict() for d in query.stream()]
+        else:
+            tenant_map = _BANCO_TRABALHADORES.setdefault(self.tenant_id, {})
+            todos = sorted(tenant_map.values(), key=lambda t: str(t["id"]))
+            if terceirizada_id_filtro:
+                todos = [t for t in todos if t["terceirizadaId"] == terceirizada_id_filtro]
 
         inicio = 0
         if cursor:
@@ -151,56 +169,110 @@ class TrabalhadoresRepositorio:
     def obter_trabalhador(
         self, trabalhador_id: str, terceirizada_id_filtro: str | None = None
     ) -> TrabalhadorDetalhe | None:
+        if self.db is not None:
+            doc_ref = self._tenant_ref().collection("trabalhadores").document(trabalhador_id)
+            snap = doc_ref.get()
+            if not snap.exists:
+                return None
+            dados = snap.to_dict()
+            if not dados:
+                return None
+            if terceirizada_id_filtro and dados.get("terceirizadaId") != terceirizada_id_filtro:
+                return None
+
+            # Documentos do trabalhador do Firestore
+            docs_query = (
+                self._tenant_ref()
+                .collection("documentos")
+                .where("trabalhadorId", "==", trabalhador_id)
+            )
+            docs_trb = [Documento(**d.to_dict()) for d in docs_query.stream()]
+
+            # Alocações com semáforo dinâmico
+            alocs_trb = [
+                self.calcular_semaforo(ctr_id, trabalhador_id)
+                for ctr_id in dados.get("alocacoes", [])
+            ]
+
+            return TrabalhadorDetalhe(
+                id=dados["id"],
+                terceirizadaId=dados["terceirizadaId"],
+                nome=dados["nome"],
+                cpfMascarado=dados["cpfMascarado"],
+                ativo=dados["ativo"],
+                documentos=docs_trb,
+                alocacoes=alocs_trb,
+            )
+
         tenant_map = _BANCO_TRABALHADORES.get(self.tenant_id, {})
-        dados = tenant_map.get(trabalhador_id)
-        if not dados:
+        dados_mem = tenant_map.get(trabalhador_id)
+        if not dados_mem:
             return None
-        if terceirizada_id_filtro and dados["terceirizadaId"] != terceirizada_id_filtro:
+        if terceirizada_id_filtro and dados_mem["terceirizadaId"] != terceirizada_id_filtro:
             return None
 
-        # Documentos do trabalhador
         docs_map = _BANCO_DOCUMENTOS.get(self.tenant_id, {})
-        docs_trb = [
+        docs_trb_mem = [
             Documento(**d) for d in docs_map.values() if d.get("trabalhadorId") == trabalhador_id
         ]
 
-        # Alocações do trabalhador com semáforo dinâmico (RN-04 a RN-07)
-        alocs_trb = [
-            self.calcular_semaforo(ctr_id, trabalhador_id) for ctr_id in dados.get("alocacoes", [])
+        alocs_trb_mem = [
+            self.calcular_semaforo(ctr_id, trabalhador_id)
+            for ctr_id in dados_mem.get("alocacoes", [])
         ]
 
         return TrabalhadorDetalhe(
-            id=dados["id"],
-            terceirizadaId=dados["terceirizadaId"],
-            nome=dados["nome"],
-            cpfMascarado=dados["cpfMascarado"],
-            ativo=dados["ativo"],
-            documentos=docs_trb,
-            alocacoes=alocs_trb,
+            id=dados_mem["id"],
+            terceirizadaId=dados_mem["terceirizadaId"],
+            nome=dados_mem["nome"],
+            cpfMascarado=dados_mem["cpfMascarado"],
+            ativo=dados_mem["ativo"],
+            documentos=docs_trb_mem,
+            alocacoes=alocs_trb_mem,
         )
 
     def criar_trabalhador(self, nome: str, cpf: str, terceirizada_id: str) -> Trabalhador:
-        tenant_map = _BANCO_TRABALHADORES.setdefault(self.tenant_id, {})
         trb_id = f"trb_{uuid.uuid4().hex[:8]}"
         cpf_limpo = re.sub(r"\D", "", cpf)
         cpf_mascarado = f"***.{cpf_limpo[3:6]}.{cpf_limpo[6:9]}-**"
         chave_hmac = get_settings().cpf_hmac_key.encode("utf-8")
         cpf_hash = hmac.new(chave_hmac, cpf_limpo.encode("utf-8"), hashlib.sha256).hexdigest()
 
-        for existente in tenant_map.values():
-            if existente.get("cpfHash") == cpf_hash:
+        if self.db is not None:
+            indice_ref = self._tenant_ref().collection("indiceCpf").document(cpf_hash)
+            if indice_ref.get().exists:
                 raise conflito("CPF já cadastrado no tenant.")
 
-        registro = {
-            "id": trb_id,
-            "terceirizadaId": terceirizada_id,
-            "nome": nome,
-            "cpfHash": cpf_hash,
-            "cpfMascarado": cpf_mascarado,
-            "ativo": True,
-            "alocacoes": [],
-        }
-        tenant_map[trb_id] = registro
+            registro = {
+                "id": trb_id,
+                "terceirizadaId": terceirizada_id,
+                "nome": nome,
+                "cpfHash": cpf_hash,
+                "cpfMascarado": cpf_mascarado,
+                "ativo": True,
+                "alocacoes": [],
+                "criadoEm": datetime.datetime.now(UTC).isoformat(),
+            }
+            self._tenant_ref().collection("trabalhadores").document(trb_id).set(registro)
+            indice_ref.set({"trabalhadorId": trb_id})
+        else:
+            tenant_map = _BANCO_TRABALHADORES.setdefault(self.tenant_id, {})
+            for existente in tenant_map.values():
+                if existente.get("cpfHash") == cpf_hash:
+                    raise conflito("CPF já cadastrado no tenant.")
+
+            registro = {
+                "id": trb_id,
+                "terceirizadaId": terceirizada_id,
+                "nome": nome,
+                "cpfHash": cpf_hash,
+                "cpfMascarado": cpf_mascarado,
+                "ativo": True,
+                "alocacoes": [],
+                "criadoEm": datetime.datetime.now(UTC).isoformat(),
+            }
+            tenant_map[trb_id] = registro
+
         return Trabalhador(
             id=trb_id,
             terceirizadaId=terceirizada_id,
@@ -216,9 +288,7 @@ class TrabalhadoresRepositorio:
         data_referencia: datetime.date | None = None,
     ) -> Alocacao:
         """Calcula dinamicamente o semáforo de SST para uma alocação (RN-04 a RN-07)."""
-        from habilita.cadastros.repositorio import CadastrosRepositorio
-
-        cad_repo = CadastrosRepositorio(tenant_id=self.tenant_id)
+        cad_repo = CadastrosRepositorio(tenant_id=self.tenant_id, db=self.db)
         contrato = cad_repo.obter_contrato(contrato_id)
 
         hoje = data_referencia or datetime.datetime.now(UTC).date()
@@ -234,12 +304,21 @@ class TrabalhadoresRepositorio:
                 proximoVencimento=None,
             )
 
-        docs_map = _BANCO_DOCUMENTOS.get(self.tenant_id, {})
-        docs_trb = [
-            d
-            for d in docs_map.values()
-            if d.get("trabalhadorId") == trabalhador_id and d.get("statusRevisao") == "APROVADO"
-        ]
+        if self.db is not None:
+            docs_query = (
+                self._tenant_ref()
+                .collection("documentos")
+                .where("trabalhadorId", "==", trabalhador_id)
+                .where("statusRevisao", "==", "APROVADO")
+            )
+            docs_trb = [d.to_dict() for d in docs_query.stream()]
+        else:
+            docs_map = _BANCO_DOCUMENTOS.get(self.tenant_id, {})
+            docs_trb = [
+                d
+                for d in docs_map.values()
+                if d.get("trabalhadorId") == trabalhador_id and d.get("statusRevisao") == "APROVADO"
+            ]
 
         pendencias: list[Pendencia] = []
         situacoes: list[str] = []
@@ -249,7 +328,6 @@ class TrabalhadoresRepositorio:
             tipo_id = ex.id
             tipo_nome = ex.nome
 
-            # Filtra documentos aprovados desse tipo
             docs_tipo = [d for d in docs_trb if d.get("tipoDocumentoId") == tipo_id]
             if not docs_tipo:
                 pendencias.append(
@@ -262,7 +340,6 @@ class TrabalhadoresRepositorio:
                 situacoes.append("AUSENTE")
                 continue
 
-            # Documento eleito com maior data de validade
             doc_eleito = max(docs_tipo, key=lambda d: str(d.get("validoAte", "")))
             valido_ate_str = str(doc_eleito.get("validoAte", ""))
             try:
@@ -289,10 +366,6 @@ class TrabalhadoresRepositorio:
 
             situacoes.append(situacao)
 
-        # Regras de consolidação do semáforo (RN-06):
-        # - VERMELHO se qualquer exigência estiver AUSENTE ou VENCIDO
-        # - AMARELO se todas forem atendidas e pelo menos uma estiver A_VENCER (<= 30 dias)
-        # - VERDE se todas estiverem VALIDO (> 30 dias)
         if any(s in ("AUSENTE", "VENCIDO") for s in situacoes):
             semaforo = "VERMELHO"
         elif any(s == "A_VENCER" for s in situacoes):
@@ -312,10 +385,20 @@ class TrabalhadoresRepositorio:
         )
 
     def vincular_alocacao(self, contrato_id: str, trabalhador_id: str) -> Alocacao:
-        tenant_map = _BANCO_TRABALHADORES.setdefault(self.tenant_id, {})
-        trb = tenant_map.get(trabalhador_id)
-        if trb and contrato_id not in trb.get("alocacoes", []):
-            trb.setdefault("alocacoes", []).append(contrato_id)
+        if self.db is not None:
+            trb_ref = self._tenant_ref().collection("trabalhadores").document(trabalhador_id)
+            snap = trb_ref.get()
+            if snap.exists:
+                dados = snap.to_dict() or {}
+                alocs = list(dados.get("alocacoes", []))
+                if contrato_id not in alocs:
+                    alocs.append(contrato_id)
+                    trb_ref.update({"alocacoes": alocs})
+        else:
+            tenant_map = _BANCO_TRABALHADORES.setdefault(self.tenant_id, {})
+            trb = tenant_map.get(trabalhador_id)
+            if trb and contrato_id not in trb.get("alocacoes", []):
+                trb.setdefault("alocacoes", []).append(contrato_id)
 
         return self.calcular_semaforo(contrato_id, trabalhador_id)
 
@@ -329,20 +412,32 @@ class TrabalhadoresRepositorio:
         limite: int = 20,
         cursor: str | None = None,
     ) -> tuple[list[Documento], str | None]:
-        docs_map = _BANCO_DOCUMENTOS.setdefault(self.tenant_id, {})
-        todos = sorted(docs_map.values(), key=lambda d: d["id"])
+        if self.db is not None:
+            col = self._tenant_ref().collection("documentos")
+            if status_revisao:
+                col = col.where("statusRevisao", "==", status_revisao)
+            todos = [d.to_dict() for d in col.order_by("id").stream()]
 
-        if status_revisao:
-            todos = [d for d in todos if d.get("statusRevisao") == status_revisao]
+            if terceirizada_id_filtro:
+                trb_col = self._tenant_ref().collection("trabalhadores")
+                trbs = trb_col.where("terceirizadaId", "==", terceirizada_id_filtro).stream()
+                trb_ids = {t.id for t in trbs}
+                todos = [d for d in todos if d.get("trabalhadorId") in trb_ids]
+        else:
+            docs_map = _BANCO_DOCUMENTOS.setdefault(self.tenant_id, {})
+            todos = sorted(docs_map.values(), key=lambda d: str(d["id"]))
 
-        if terceirizada_id_filtro:
-            trb_map = _BANCO_TRABALHADORES.get(self.tenant_id, {})
-            trb_ids_terc = {
-                tid
-                for tid, trb in trb_map.items()
-                if trb["terceirizadaId"] == terceirizada_id_filtro
-            }
-            todos = [d for d in todos if d.get("trabalhadorId") in trb_ids_terc]
+            if status_revisao:
+                todos = [d for d in todos if d.get("statusRevisao") == status_revisao]
+
+            if terceirizada_id_filtro:
+                trb_map = _BANCO_TRABALHADORES.get(self.tenant_id, {})
+                trb_ids_terc = {
+                    tid
+                    for tid, trb in trb_map.items()
+                    if trb["terceirizadaId"] == terceirizada_id_filtro
+                }
+                todos = [d for d in todos if d.get("trabalhadorId") in trb_ids_terc]
 
         inicio = 0
         if cursor:
@@ -360,18 +455,42 @@ class TrabalhadoresRepositorio:
     def obter_documento(
         self, documento_id: str, terceirizada_id_filtro: str | None = None
     ) -> Documento | None:
+        if self.db is not None:
+            doc_ref = self._tenant_ref().collection("documentos").document(documento_id)
+            snap = doc_ref.get()
+            if not snap.exists:
+                return None
+            dados = snap.to_dict()
+            if not dados:
+                return None
+
+            if terceirizada_id_filtro:
+                trb_ref = (
+                    self._tenant_ref()
+                    .collection("trabalhadores")
+                    .document(dados.get("trabalhadorId", ""))
+                )
+                trb_snap = trb_ref.get()
+                if (
+                    not trb_snap.exists
+                    or trb_snap.to_dict().get("terceirizadaId") != terceirizada_id_filtro
+                ):
+                    return None
+
+            return Documento(**dados)
+
         docs_map = _BANCO_DOCUMENTOS.get(self.tenant_id, {})
-        dados = docs_map.get(documento_id)
-        if not dados:
+        dados_mem = docs_map.get(documento_id)
+        if not dados_mem:
             return None
 
         if terceirizada_id_filtro:
             trb_map = _BANCO_TRABALHADORES.get(self.tenant_id, {})
-            trb = trb_map.get(dados.get("trabalhadorId", ""))
+            trb = trb_map.get(dados_mem.get("trabalhadorId", ""))
             if not trb or trb.get("terceirizadaId") != terceirizada_id_filtro:
                 return None
 
-        return Documento(**dados)
+        return Documento(**dados_mem)
 
     def criar_documento(
         self,
@@ -381,7 +500,6 @@ class TrabalhadoresRepositorio:
         data_emissao: str | None,
         arquivo_meta: ArquivoMetadados,
     ) -> Documento:
-        docs_map = _BANCO_DOCUMENTOS.setdefault(self.tenant_id, {})
         doc_id = f"doc_{uuid.uuid4().hex[:8]}"
         agora = datetime.datetime.now(UTC).isoformat()
 
@@ -398,36 +516,82 @@ class TrabalhadoresRepositorio:
             "situacaoValidade": "VALIDO",
             "arquivo": arquivo_meta.model_dump(),
         }
-        docs_map[doc_id] = registro
+
+        if self.db is not None:
+            self._tenant_ref().collection("documentos").document(doc_id).set(registro)
+            trb_ref = self._tenant_ref().collection("trabalhadores").document(trabalhador_id)
+            trb_ref.collection("documentos").document(doc_id).set(registro)
+        else:
+            docs_map = _BANCO_DOCUMENTOS.setdefault(self.tenant_id, {})
+            docs_map[doc_id] = registro
+
         return Documento(**registro)
 
     def aprovar_documento(self, documento_id: str) -> Documento:
+        agora = datetime.datetime.now(UTC).isoformat()
+        if self.db is not None:
+            doc_ref = self._tenant_ref().collection("documentos").document(documento_id)
+            snap = doc_ref.get()
+            if not snap.exists:
+                raise recurso_nao_encontrado(f"Documento '{documento_id}' não encontrado.")
+            dados = snap.to_dict() or {}
+            if dados.get("statusRevisao") != "PENDENTE":
+                raise conflito("Apenas documentos com status PENDENTE podem ser aprovados.")
+
+            atualizacao = {
+                "statusRevisao": "APROVADO",
+                "revisadoEm": agora,
+                "motivoRejeicao": None,
+            }
+            doc_ref.update(atualizacao)
+            dados.update(atualizacao)
+            return Documento(**dados)
+
         docs_map = _BANCO_DOCUMENTOS.get(self.tenant_id, {})
-        dados = docs_map.get(documento_id)
-        if not dados:
+        dados_mem = docs_map.get(documento_id)
+        if not dados_mem:
             raise recurso_nao_encontrado(f"Documento '{documento_id}' não encontrado.")
 
-        if dados.get("statusRevisao") != "PENDENTE":
+        if dados_mem.get("statusRevisao") != "PENDENTE":
             raise conflito("Apenas documentos com status PENDENTE podem ser aprovados.")
 
-        dados["statusRevisao"] = "APROVADO"
-        dados["revisadoEm"] = datetime.datetime.now(UTC).isoformat()
-        dados["motivoRejeicao"] = None
-        return Documento(**dados)
+        dados_mem["statusRevisao"] = "APROVADO"
+        dados_mem["revisadoEm"] = agora
+        dados_mem["motivoRejeicao"] = None
+        return Documento(**dados_mem)
 
     def rejeitar_documento(self, documento_id: str, motivo: str) -> Documento:
+        agora = datetime.datetime.now(UTC).isoformat()
+        if self.db is not None:
+            doc_ref = self._tenant_ref().collection("documentos").document(documento_id)
+            snap = doc_ref.get()
+            if not snap.exists:
+                raise recurso_nao_encontrado(f"Documento '{documento_id}' não encontrado.")
+            dados = snap.to_dict() or {}
+            if dados.get("statusRevisao") != "PENDENTE":
+                raise conflito("Apenas documentos com status PENDENTE podem ser rejeitados.")
+
+            atualizacao = {
+                "statusRevisao": "REJEITADO",
+                "revisadoEm": agora,
+                "motivoRejeicao": motivo,
+            }
+            doc_ref.update(atualizacao)
+            dados.update(atualizacao)
+            return Documento(**dados)
+
         docs_map = _BANCO_DOCUMENTOS.get(self.tenant_id, {})
-        dados = docs_map.get(documento_id)
-        if not dados:
+        dados_mem = docs_map.get(documento_id)
+        if not dados_mem:
             raise recurso_nao_encontrado(f"Documento '{documento_id}' não encontrado.")
 
-        if dados.get("statusRevisao") != "PENDENTE":
+        if dados_mem.get("statusRevisao") != "PENDENTE":
             raise conflito("Apenas documentos com status PENDENTE podem ser rejeitados.")
 
-        dados["statusRevisao"] = "REJEITADO"
-        dados["revisadoEm"] = datetime.datetime.now(UTC).isoformat()
-        dados["motivoRejeicao"] = motivo
-        return Documento(**dados)
+        dados_mem["statusRevisao"] = "REJEITADO"
+        dados_mem["revisadoEm"] = agora
+        dados_mem["motivoRejeicao"] = motivo
+        return Documento(**dados_mem)
 
     def gerar_url_download(
         self, documento_id: str, terceirizada_id_filtro: str | None = None
