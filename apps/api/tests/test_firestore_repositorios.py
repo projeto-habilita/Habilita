@@ -232,11 +232,13 @@ def test_bloqueio_fallback_memoria_fora_de_local(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("CORS_ORIGINS", "https://app.habilita.com.br")
 
     # 1. Sem conexão com Firestore, instanciar repositório falha imediatamente
+    monkeypatch.setattr("habilita.cadastros.repositorio.obter_firestore_client", lambda: None)
+    monkeypatch.setattr("habilita.trabalhadores.repositorio.obter_firestore_client", lambda: None)
     with pytest.raises(RuntimeError, match="Armazenamento em memória proibido fora de ENV=local"):
-        CadastrosRepositorio(tenant_id="tnt_alfa", db=None)
+        CadastrosRepositorio(tenant_id="tnt_alfa")
 
     with pytest.raises(RuntimeError, match="Armazenamento em memória proibido fora de ENV=local"):
-        TrabalhadoresRepositorio(tenant_id="tnt_alfa", db=None)
+        TrabalhadoresRepositorio(tenant_id="tnt_alfa")
 
     # 2. Com mock_db conectado, se o documento não existir no Firestore,
     # NÃO deve fazer fallback para o banco em memória (deve retornar None)
