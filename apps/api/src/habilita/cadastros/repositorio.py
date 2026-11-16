@@ -24,6 +24,7 @@ from habilita.cadastros.schemas import (
     TipoDocumento,
 )
 from habilita.comum.firestore import obter_firestore_client
+from habilita.config import get_settings
 
 UTC = getattr(datetime, "UTC", datetime.timezone.utc)  # noqa: UP017
 
@@ -131,6 +132,8 @@ class CadastrosRepositorio:
     def __init__(self, tenant_id: str, db: FirestoreClient | None = None) -> None:
         self.tenant_id = tenant_id
         self.db = db if db is not None else obter_firestore_client()
+        if self.db is None and get_settings().app_env != "local":
+            raise RuntimeError("Armazenamento em memória proibido fora de ENV=local.")
 
     def _tenant_ref(self) -> Any:
         if self.db is None:
@@ -147,10 +150,12 @@ class CadastrosRepositorio:
             col = self._tenant_ref().collection("terceirizadas")
             query = col.order_by("id")
             todos = [d.to_dict() for d in query.stream()]
-            if not todos:
+            if not todos and get_settings().app_env == "local":
                 tenant_map = _BANCO_TERCEIRIZADAS.get(self.tenant_id, {})
                 todos = sorted(tenant_map.values(), key=lambda t: str(t["id"]))
         else:
+            if get_settings().app_env != "local":
+                raise RuntimeError("Armazenamento em memória não é permitido fora de ENV=local.")
             tenant_map = _BANCO_TERCEIRIZADAS.setdefault(self.tenant_id, {})
             todos = sorted(tenant_map.values(), key=lambda t: str(t["id"]))
 
@@ -188,6 +193,11 @@ class CadastrosRepositorio:
                         cnpj=dados["cnpj"],
                         ativa=bool(dados.get("ativa", True)),
                     )
+            if get_settings().app_env != "local":
+                return None
+
+        if get_settings().app_env != "local":
+            raise RuntimeError("Armazenamento em memória não é permitido fora de ENV=local.")
 
         tenant_map = _BANCO_TERCEIRIZADAS.get(self.tenant_id, {})
         dados_mem = tenant_map.get(terceirizada_id)
@@ -212,9 +222,12 @@ class CadastrosRepositorio:
 
         if self.db is not None:
             self._tenant_ref().collection("terceirizadas").document(ter_id).set(registro)
+        elif get_settings().app_env != "local":
+            raise RuntimeError("Armazenamento em memória não é permitido fora de ENV=local.")
 
-        tenant_map = _BANCO_TERCEIRIZADAS.setdefault(self.tenant_id, {})
-        tenant_map[ter_id] = registro
+        if get_settings().app_env == "local":
+            tenant_map = _BANCO_TERCEIRIZADAS.setdefault(self.tenant_id, {})
+            tenant_map[ter_id] = registro
 
         return Terceirizada(
             id=ter_id,
@@ -230,10 +243,12 @@ class CadastrosRepositorio:
         if self.db is not None:
             col = self._tenant_ref().collection("tiposDocumento")
             todos = [d.to_dict() for d in col.order_by("nome").stream()]
-            if not todos:
+            if not todos and get_settings().app_env == "local":
                 tenant_map = _BANCO_TIPOS_DOCUMENTO.get(self.tenant_id, {})
                 todos = sorted(tenant_map.values(), key=lambda t: str(t["nome"]))
         else:
+            if get_settings().app_env != "local":
+                raise RuntimeError("Armazenamento em memória não é permitido fora de ENV=local.")
             tenant_map = _BANCO_TIPOS_DOCUMENTO.setdefault(self.tenant_id, {})
             todos = sorted(tenant_map.values(), key=lambda t: str(t["nome"]))
 
@@ -265,6 +280,11 @@ class CadastrosRepositorio:
                             nome=dados["nome"],
                             validadeMeses=int(dados["validadeMeses"]),
                         )
+            if get_settings().app_env != "local":
+                return None
+
+        if get_settings().app_env != "local":
+            raise RuntimeError("Armazenamento em memória não é permitido fora de ENV=local.")
 
         tenant_map = _BANCO_TIPOS_DOCUMENTO.get(self.tenant_id, {})
         for tid in aliases:
@@ -289,9 +309,12 @@ class CadastrosRepositorio:
 
         if self.db is not None:
             self._tenant_ref().collection("tiposDocumento").document(tipo_id).set(registro)
+        elif get_settings().app_env != "local":
+            raise RuntimeError("Armazenamento em memória não é permitido fora de ENV=local.")
 
-        tenant_map = _BANCO_TIPOS_DOCUMENTO.setdefault(self.tenant_id, {})
-        tenant_map[tipo_id] = registro
+        if get_settings().app_env == "local":
+            tenant_map = _BANCO_TIPOS_DOCUMENTO.setdefault(self.tenant_id, {})
+            tenant_map[tipo_id] = registro
 
         return TipoDocumento(
             id=tipo_id,
@@ -342,12 +365,14 @@ class CadastrosRepositorio:
             else:
                 query = col.order_by("id")
             todos = [d.to_dict() for d in query.stream()]
-            if not todos:
+            if not todos and get_settings().app_env == "local":
                 tenant_map = _BANCO_CONTRATOS.get(self.tenant_id, {})
                 todos = sorted(tenant_map.values(), key=lambda c: str(c["id"]))
                 if terceirizada_id_filtro:
                     todos = [c for c in todos if c["terceirizadaId"] == terceirizada_id_filtro]
         else:
+            if get_settings().app_env != "local":
+                raise RuntimeError("Armazenamento em memória não é permitido fora de ENV=local.")
             tenant_map = _BANCO_CONTRATOS.setdefault(self.tenant_id, {})
             todos = sorted(tenant_map.values(), key=lambda c: str(c["id"]))
             if terceirizada_id_filtro:
@@ -381,6 +406,11 @@ class CadastrosRepositorio:
                     ):
                         return None
                     return self._montar_contrato(dados)
+            if get_settings().app_env != "local":
+                return None
+
+        if get_settings().app_env != "local":
+            raise RuntimeError("Armazenamento em memória não é permitido fora de ENV=local.")
 
         tenant_map = _BANCO_CONTRATOS.get(self.tenant_id, {})
         dados_mem = tenant_map.get(contrato_id)
@@ -406,9 +436,12 @@ class CadastrosRepositorio:
 
         if self.db is not None:
             self._tenant_ref().collection("contratos").document(ctr_id).set(registro)
+        elif get_settings().app_env != "local":
+            raise RuntimeError("Armazenamento em memória não é permitido fora de ENV=local.")
 
-        tenant_map = _BANCO_CONTRATOS.setdefault(self.tenant_id, {})
-        tenant_map[ctr_id] = registro
+        if get_settings().app_env == "local":
+            tenant_map = _BANCO_CONTRATOS.setdefault(self.tenant_id, {})
+            tenant_map[ctr_id] = registro
 
         return self._montar_contrato(registro)
 
@@ -437,6 +470,11 @@ class CadastrosRepositorio:
                 dados["exigencias"] = novas_exigencias
                 dados["versaoMatriz"] = nova_versao
                 return self._montar_contrato(dados)
+            if get_settings().app_env != "local":
+                return None
+
+        if get_settings().app_env != "local":
+            raise RuntimeError("Armazenamento em memória não é permitido fora de ENV=local.")
 
         tenant_map = _BANCO_CONTRATOS.get(self.tenant_id, {})
         dados_mem = tenant_map.get(contrato_id)

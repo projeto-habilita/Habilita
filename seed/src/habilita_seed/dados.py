@@ -17,7 +17,7 @@ class UsuarioSeed:
     uid: str
     email: str
     nome: str
-    papel: str  # gestor | terceirizada | porteiro
+    papel: str  # admin_contratante | analista_sst | terceirizada | porteiro (ADR 0002)
     tenant_id: str
     terceirizada_id: str | None = None
 
@@ -284,10 +284,24 @@ def construir_cenarios_seed() -> list[TenantSeed]:
 
     usuarios_alfa = [
         UsuarioSeed(
+            uid="uid_admin_alfa",
+            email="admin.alfa@demo.habilita.test",
+            nome="Administrador Alfa",
+            papel="admin_contratante",
+            tenant_id="tnt_alfa",
+        ),
+        UsuarioSeed(
+            uid="uid_analista_alfa",
+            email="analista.alfa@demo.habilita.test",
+            nome="Analista SST Alfa",
+            papel="analista_sst",
+            tenant_id="tnt_alfa",
+        ),
+        UsuarioSeed(
             uid="uid_gestor_alfa",
             email="gestor.alfa@demo.habilita.test",
             nome="Gestor SST Alfa",
-            papel="gestor",
+            papel="admin_contratante",
             tenant_id="tnt_alfa",
         ),
         UsuarioSeed(
@@ -602,10 +616,24 @@ def construir_cenarios_seed() -> list[TenantSeed]:
 
     usuarios_beta = [
         UsuarioSeed(
+            uid="uid_admin_beta",
+            email="admin.beta@demo.habilita.test",
+            nome="Administrador Beta",
+            papel="admin_contratante",
+            tenant_id="tnt_beta",
+        ),
+        UsuarioSeed(
+            uid="uid_analista_beta",
+            email="analista.beta@demo.habilita.test",
+            nome="Analista SST Beta",
+            papel="analista_sst",
+            tenant_id="tnt_beta",
+        ),
+        UsuarioSeed(
             uid="uid_gestor_beta",
             email="gestor.beta@demo.habilita.test",
             nome="Gestor SST Beta",
-            papel="gestor",
+            papel="admin_contratante",
             tenant_id="tnt_beta",
         ),
         UsuarioSeed(

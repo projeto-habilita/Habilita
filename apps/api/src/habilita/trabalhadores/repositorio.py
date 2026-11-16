@@ -116,6 +116,8 @@ class TrabalhadoresRepositorio:
     def __init__(self, tenant_id: str, db: FirestoreClient | None = None) -> None:
         self.tenant_id = tenant_id
         self.db = db if db is not None else obter_firestore_client()
+        if self.db is None and get_settings().app_env != "local":
+            raise RuntimeError("Armazenamento em memória proibido fora de ENV=local.")
 
     def _tenant_ref(self) -> Any:
         if self.db is None:
@@ -138,12 +140,14 @@ class TrabalhadoresRepositorio:
             else:
                 query = col.order_by("id")
             todos = [d.to_dict() for d in query.stream()]
-            if not todos:
+            if not todos and get_settings().app_env == "local":
                 tenant_map = _BANCO_TRABALHADORES.get(self.tenant_id, {})
                 todos = sorted(tenant_map.values(), key=lambda t: str(t["id"]))
                 if terceirizada_id_filtro:
                     todos = [t for t in todos if t["terceirizadaId"] == terceirizada_id_filtro]
         else:
+            if get_settings().app_env != "local":
+                raise RuntimeError("Armazenamento em memória não é permitido fora de ENV=local.")
             tenant_map = _BANCO_TRABALHADORES.setdefault(self.tenant_id, {})
             todos = sorted(tenant_map.values(), key=lambda t: str(t["id"]))
             if terceirizada_id_filtro:
@@ -182,6 +186,8 @@ class TrabalhadoresRepositorio:
                 dados_trb = snap.to_dict()
 
         if not dados_trb:
+            if get_settings().app_env != "local":
+                return None
             tenant_map = _BANCO_TRABALHADORES.get(self.tenant_id, {})
             dados_trb = tenant_map.get(trabalhador_id)
 
@@ -217,7 +223,7 @@ class TrabalhadoresRepositorio:
                     if doc_snap is not None:
                         docs_trb.append(self._montar_documento(doc_snap))
 
-        if not docs_trb:
+        if not docs_trb and get_settings().app_env == "local":
             docs_map = _BANCO_DOCUMENTOS.get(self.tenant_id, {})
             docs_trb = [
                 self._montar_documento(d)
@@ -269,6 +275,8 @@ class TrabalhadoresRepositorio:
             self._tenant_ref().collection("trabalhadores").document(trb_id).set(registro)
             indice_ref.set({"trabalhadorId": trb_id})
         else:
+            if get_settings().app_env != "local":
+                raise RuntimeError("Armazenamento em memória não é permitido fora de ENV=local.")
             tenant_map = _BANCO_TRABALHADORES.setdefault(self.tenant_id, {})
             for existente in tenant_map.values():
                 if existente.get("cpfHash") == cpf_hash:
@@ -286,8 +294,9 @@ class TrabalhadoresRepositorio:
             }
             tenant_map[trb_id] = registro
 
-        # Mantém também no cache em memória
-        _BANCO_TRABALHADORES.setdefault(self.tenant_id, {})[trb_id] = registro
+        # Mantém também no cache em memória (somente em ambiente local)
+        if get_settings().app_env == "local":
+            _BANCO_TRABALHADORES.setdefault(self.tenant_id, {})[trb_id] = registro
 
         return Trabalhador(
             id=trb_id,
@@ -341,7 +350,7 @@ class TrabalhadoresRepositorio:
                 )
                 docs_trb = [d.to_dict() for d in t_docs]
 
-        if not docs_trb:
+        if not docs_trb and get_settings().app_env == "local":
             docs_map = _BANCO_DOCUMENTOS.get(self.tenant_id, {})
             docs_trb = [
                 d
@@ -430,11 +439,14 @@ class TrabalhadoresRepositorio:
                 if contrato_id not in alocs:
                     alocs.append(contrato_id)
                     trb_ref.update({"alocacoes": alocs})
+        elif get_settings().app_env != "local":
+            raise RuntimeError("Armazenamento em memória não é permitido fora de ENV=local.")
 
-        tenant_map = _BANCO_TRABALHADORES.setdefault(self.tenant_id, {})
-        trb = tenant_map.get(trabalhador_id)
-        if trb and contrato_id not in trb.get("alocacoes", []):
-            trb.setdefault("alocacoes", []).append(contrato_id)
+        if get_settings().app_env == "local":
+            tenant_map = _BANCO_TRABALHADORES.setdefault(self.tenant_id, {})
+            trb = tenant_map.get(trabalhador_id)
+            if trb and contrato_id not in trb.get("alocacoes", []):
+                trb.setdefault("alocacoes", []).append(contrato_id)
 
         return self.calcular_semaforo(contrato_id, trabalhador_id)
 
@@ -496,20 +508,31 @@ class TrabalhadoresRepositorio:
                     if d.reference.path.startswith(f"tenants/{self.tenant_id}/")
                     and (doc_dict := d.to_dict()) is not None
                 ]
+        else:
+            if get_settings().app_env != "local":
+                raise RuntimeError("Armazenamento em memória não é permitido fora de ENV=local.")
 
-        if not todos:
+        if not todos and get_settings().app_env == "local":
             docs_map = _BANCO_DOCUMENTOS.setdefault(self.tenant_id, {})
             todos = sorted(docs_map.values(), key=lambda d: str(d["id"]))
             if status_revisao:
                 todos = [d for d in todos if d.get("statusRevisao") == status_revisao]
 
         if terceirizada_id_filtro:
-            trb_map = _BANCO_TRABALHADORES.get(self.tenant_id, {})
-            trb_ids_terc = {
-                tid
-                for tid, trb in trb_map.items()
-                if trb["terceirizadaId"] == terceirizada_id_filtro
-            }
+            if self.db is not None:
+                trb_col = (
+                    self._tenant_ref()
+                    .collection("trabalhadores")
+                    .where("terceirizadaId", "==", terceirizada_id_filtro)
+                )
+                trb_ids_terc = {d.id for d in trb_col.stream()}
+            else:
+                trb_map = _BANCO_TRABALHADORES.get(self.tenant_id, {})
+                trb_ids_terc = {
+                    tid
+                    for tid, trb in trb_map.items()
+                    if trb["terceirizadaId"] == terceirizada_id_filtro
+                }
             todos = [d for d in todos if d.get("trabalhadorId") in trb_ids_terc]
 
         inicio = 0
@@ -548,6 +571,8 @@ class TrabalhadoresRepositorio:
                         break
 
         if not dados:
+            if get_settings().app_env != "local":
+                return None
             docs_map = _BANCO_DOCUMENTOS.get(self.tenant_id, {})
             dados = docs_map.get(documento_id)
 
@@ -590,9 +615,12 @@ class TrabalhadoresRepositorio:
             self._tenant_ref().collection("documentos").document(doc_id).set(registro)
             trb_ref = self._tenant_ref().collection("trabalhadores").document(trabalhador_id)
             trb_ref.collection("documentos").document(doc_id).set(registro)
+        elif get_settings().app_env != "local":
+            raise RuntimeError("Armazenamento em memória não é permitido fora de ENV=local.")
 
-        docs_map = _BANCO_DOCUMENTOS.setdefault(self.tenant_id, {})
-        docs_map[doc_id] = registro
+        if get_settings().app_env == "local":
+            docs_map = _BANCO_DOCUMENTOS.setdefault(self.tenant_id, {})
+            docs_map[doc_id] = registro
 
         return self._montar_documento(registro)
 
@@ -624,10 +652,13 @@ class TrabalhadoresRepositorio:
             )
             if sub_doc.get().exists:
                 sub_doc.update(atualizacao)
+        elif get_settings().app_env != "local":
+            raise RuntimeError("Armazenamento em memória não é permitido fora de ENV=local.")
 
-        docs_map = _BANCO_DOCUMENTOS.setdefault(self.tenant_id, {})
-        if documento_id in docs_map:
-            docs_map[documento_id].update(atualizacao)
+        if get_settings().app_env == "local":
+            docs_map = _BANCO_DOCUMENTOS.setdefault(self.tenant_id, {})
+            if documento_id in docs_map:
+                docs_map[documento_id].update(atualizacao)
 
         doc_dict = doc.model_dump()
         doc_dict.update(atualizacao)
@@ -661,10 +692,13 @@ class TrabalhadoresRepositorio:
             )
             if sub_doc.get().exists:
                 sub_doc.update(atualizacao)
+        elif get_settings().app_env != "local":
+            raise RuntimeError("Armazenamento em memória não é permitido fora de ENV=local.")
 
-        docs_map = _BANCO_DOCUMENTOS.setdefault(self.tenant_id, {})
-        if documento_id in docs_map:
-            docs_map[documento_id].update(atualizacao)
+        if get_settings().app_env == "local":
+            docs_map = _BANCO_DOCUMENTOS.setdefault(self.tenant_id, {})
+            if documento_id in docs_map:
+                docs_map[documento_id].update(atualizacao)
 
         doc_dict = doc.model_dump()
         doc_dict.update(atualizacao)

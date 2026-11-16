@@ -55,18 +55,22 @@ docker compose --profile seed run --rm seed --hoje 2026-11-01
 
 | E-mail | UID | Papel | Tenant | Terceirizada | Finalidade |
 |---|---|---|---|---|---|
-| `gestor.alfa@demo.habilita.test` | `uid_gestor_alfa` | `gestor` | `tnt_alfa` | — | Gestão e aprovação de documentos de SST no Tenant Alfa |
+| `admin.alfa@demo.habilita.test` | `uid_admin_alfa` | `admin_contratante` | `tnt_alfa` | — | Administração e gestão de contratos e cadastros no Tenant Alfa |
+| `analista.alfa@demo.habilita.test` | `uid_analista_alfa` | `analista_sst` | `tnt_alfa` | — | Análise e aprovação de documentos de SST no Tenant Alfa |
+| `gestor.alfa@demo.habilita.test` | `uid_gestor_alfa` | `admin_contratante` | `tnt_alfa` | — | Gestão e aprovação de documentos no Tenant Alfa (compatibilidade demo) |
 | `porteiro.alfa@demo.habilita.test` | `uid_porteiro_alfa` | `porteiro` | `tnt_alfa` | — | Consulta de liberação na portaria no Tenant Alfa |
 | `terceirizada1.alfa@demo.habilita.test` | `uid_terc_alfa_1` | `terceirizada` | `tnt_alfa` | `ter_alfa_1` | Upload e acompanhamento de trabalhadores da Terceirizada 1 |
 | `terceirizada2.alfa@demo.habilita.test` | `uid_terc_alfa_2` | `terceirizada` | `tnt_alfa` | `ter_alfa_2` | Gestão de trabalhadores da Terceirizada 2 no Tenant Alfa |
-| `gestor.beta@demo.habilita.test` | `uid_gestor_beta` | `gestor` | `tnt_beta` | — | Gestor do Tenant Beta (isolamento de tenant) |
+| `admin.beta@demo.habilita.test` | `uid_admin_beta` | `admin_contratante` | `tnt_beta` | — | Administrador do Tenant Beta (isolamento de tenant) |
+| `analista.beta@demo.habilita.test` | `uid_analista_beta` | `analista_sst` | `tnt_beta` | — | Analista SST do Tenant Beta (isolamento de tenant) |
+| `gestor.beta@demo.habilita.test` | `uid_gestor_beta` | `admin_contratante` | `tnt_beta` | — | Gestor do Tenant Beta (compatibilidade demo) |
 | `porteiro.beta@demo.habilita.test` | `uid_porteiro_beta` | `porteiro` | `tnt_beta` | — | Portaria do Tenant Beta (testes de isolamento por CPF) |
 | `terceirizada1.beta@demo.habilita.test` | `uid_terc_beta_1` | `terceirizada` | `tnt_beta` | `ter_beta_1` | Terceirizada 1 do Tenant Beta |
 | `terceirizada2.beta@demo.habilita.test` | `uid_terc_beta_2` | `terceirizada` | `tnt_beta` | `ter_beta_2` | Terceirizada 2 do Tenant Beta |
 
 As custom claims no Firebase Auth seguem rigorosamente a ADR 0002:
 - `tenantId`: Identificador do tenant (`tnt_alfa` ou `tnt_beta`).
-- `papel`: `gestor`, `terceirizada` ou `porteiro`.
+- `papel`: `admin_contratante`, `analista_sst`, `terceirizada` ou `porteiro`.
 - `terceirizadaId`: Presente **apenas** quando `papel == "terceirizada"`.
 
 ---

@@ -160,6 +160,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException) 
         405: "Método não permitido",
         422: "Entidade improcessável",
         500: "Erro interno do servidor",
+        503: "Serviço indisponível",
     }
     title = title_map.get(exc.status_code, "Erro")
     detail = str(exc.detail) if exc.detail else title

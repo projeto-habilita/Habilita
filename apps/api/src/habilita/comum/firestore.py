@@ -60,11 +60,13 @@ def obter_firestore_client() -> FirestoreClient | None:
 
     _inicializacao_tentada = True
 
-    # Se estamos explicitamente sem emuladores e sem credenciais, não inicializa cliente remoto
+    settings = get_settings()
+
+    # Se estamos sem emuladores e sem credenciais, não inicializa cliente em ambiente local
     emulator_host = os.getenv("FIRESTORE_EMULATOR_HOST")
     google_creds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 
-    if not emulator_host and not google_creds and os.getenv("APP_ENV") != "prod":
+    if not emulator_host and not google_creds and settings.app_env == "local":
         logger.debug("FIRESTORE_EMULATOR_HOST não definido. Operando em modo de memória local.")
         return None
 
@@ -75,6 +77,9 @@ def obter_firestore_client() -> FirestoreClient | None:
         logger.info("Cliente Firestore inicializado com sucesso (emulator=%s).", emulator_host)
         return _firestore_client
     except Exception as exc:
+        if settings.app_env != "local":
+            logger.error("Falha ao conectar ao Cloud Firestore fora do ambiente local (%s).", exc)
+            return None
         logger.warning(
             "Não foi possível conectar ao Firestore (%s). Usando fallback em memória.", exc
         )

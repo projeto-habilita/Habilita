@@ -10,6 +10,9 @@ Cobre:
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
+import pytest
 from fastapi.testclient import TestClient
 
 from .conftest import TNT_ALFA
@@ -80,3 +83,42 @@ def test_paginacao_limite_e_cursor(
     assert "itens" in dados
     assert len(dados["itens"]) <= 1
     assert "proximoCursor" in dados
+
+
+def test_readyz_consulta_firestore_e_falha_quando_indisponivel(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Valida que /readyz consulta o Firestore de verdade e retorna 503 se falhar (BE-11)."""
+    # 1. Sucesso quando a consulta ao Firestore funciona
+    mock_db = MagicMock()
+    mock_db.collection.return_value.limit.return_value.stream.return_value = []
+    monkeypatch.setattr("habilita.saude.rotas.obter_firestore_client", lambda: mock_db)
+
+    resp_sucesso = client.get("/readyz")
+    assert resp_sucesso.status_code == 200
+    assert resp_sucesso.json() == {"status": "ok"}
+    mock_db.collection.assert_called_with("tenants")
+
+    # 2. Falha 503 quando a consulta ao Firestore levanta erro
+    mock_db_erro = MagicMock()
+    mock_db_erro.collection.return_value.limit.return_value.stream.side_effect = RuntimeError(
+        "Timeout de rede Firestore"
+    )
+    monkeypatch.setattr("habilita.saude.rotas.obter_firestore_client", lambda: mock_db_erro)
+
+    resp_erro = client.get("/readyz")
+    assert resp_erro.status_code == 503
+    assert resp_erro.headers.get("content-type") == "application/problem+json"
+    corpo = resp_erro.json()
+    assert corpo.get("status") == 503
+    assert corpo.get("title") == "Serviço indisponível"
+
+    # 3. Fora de local sem cliente Firestore responde 503 imediatamente
+    monkeypatch.setattr("habilita.saude.rotas.obter_firestore_client", lambda: None)
+    monkeypatch.setenv("APP_ENV", "prod")
+    monkeypatch.setenv("CPF_HMAC_KEY", "chave-secreta-producao-longa")
+    monkeypatch.setenv("CORS_ORIGINS", "https://app.habilita.com.br")
+
+    resp_sem_banco_prod = client.get("/readyz")
+    assert resp_sem_banco_prod.status_code == 503
