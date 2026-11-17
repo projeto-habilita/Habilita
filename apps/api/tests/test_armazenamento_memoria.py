@@ -176,12 +176,22 @@ def test_memoria_saude() -> None:
 # -----------------------------------------------------------------------------
 def test_settings_em_prod_rejeita_chave_vazia_ou_demo() -> None:
     """Em ambiente produtivo, a API deve falhar se não houver chave real fornecida."""
-    with pytest.raises(ValidationError):
-        Settings(app_env="prod", supabase_service_key=SecretStr(""))
+    cors_prod = ["https://habilita.web.app"]
 
-    with pytest.raises(ValidationError):
-        Settings(app_env="prod", supabase_service_key=SecretStr(CHAVE_DEMO_SUPABASE))
+    with pytest.raises(ValidationError, match="SUPABASE_SERVICE_KEY"):
+        Settings(app_env="prod", cors_origins=cors_prod, supabase_service_key=SecretStr(""))
+
+    with pytest.raises(ValidationError, match="SUPABASE_SERVICE_KEY"):
+        Settings(
+            app_env="prod",
+            cors_origins=cors_prod,
+            supabase_service_key=SecretStr(CHAVE_DEMO_SUPABASE),
+        )
 
     # Chave customizada em prod é aceita
-    cfg = Settings(app_env="prod", supabase_service_key=SecretStr("super-secret-key-prod-12345"))
+    cfg = Settings(
+        app_env="prod",
+        cors_origins=cors_prod,
+        supabase_service_key=SecretStr("super-secret-key-prod-12345"),
+    )
     assert cfg.supabase_service_key.get_secret_value() == "super-secret-key-prod-12345"
