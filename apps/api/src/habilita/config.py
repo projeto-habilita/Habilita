@@ -95,5 +95,6 @@ class Settings(BaseSettings):
                 )
         return self
 
+
 def get_settings() -> Settings:
     return Settings()
