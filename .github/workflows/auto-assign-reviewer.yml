@@ -24,4 +24,5 @@ jobs:
             Gustavormq) PAR=ArthurFeitosa05 ;;
             *) exit 0 ;;
           esac
-          gh pr edit "$PR" --repo "${{ github.repository }}" --add-reviewer "$PAR"
+          gh api -X POST "repos/${{ github.repository }}/pulls/$PR/requested_reviewers" \
+            -f "reviewers[]=$PAR"
