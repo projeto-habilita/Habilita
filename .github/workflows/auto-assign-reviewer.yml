@@ -15,13 +15,14 @@ jobs:
           AUTOR: ${{ github.event.pull_request.user.login }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          case "$AUTOR" in
-            Lelafeta) PAR=osamuelleite ;;
-            osamuelleite)  PAR=Lelafeta ;;
-            CauaRVeloso)    PAR=pedrolmelo ;;
+          case "${AUTOR,,}" in
+            lelafeta)        PAR=osamuelleite ;;
+            osamuelleite)    PAR=Lelafeta ;;
+            cauarveloso)     PAR=pedrolmelo ;;
             pedrolmelo)      PAR=CauaRVeloso ;;
-            ArthurFeitosa05)  PAR=Gustavormq ;;
-            Gustavormq) PAR=ArthurFeitosa05 ;;
+            arthurfeitosa05) PAR=Gustavormq ;;
+            gustavormq)      PAR=ArthurFeitosa05 ;;
             *) exit 0 ;;
           esac
-          gh pr edit "$PR" --repo "${{ github.repository }}" --add-reviewer "$PAR"
+          gh api -X POST "repos/${{ github.repository }}/pulls/$PR/requested_reviewers" \
+            -f "reviewers[]=$PAR"
