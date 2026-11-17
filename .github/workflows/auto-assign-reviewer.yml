@@ -1,0 +1,27 @@
+name: auto-assign-reviewer
+on:
+  pull_request:
+    types: [opened, ready_for_review]
+
+jobs:
+  assign:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Pedir revisão ao par
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AUTOR: ${{ github.event.pull_request.user.login }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          case "$AUTOR" in
+            Lelafeta) PAR=osamuelleite ;;
+            osamuelleite)  PAR=Lelafeta ;;
+            CauaRVeloso)    PAR=pedrolmelo ;;
+            pedrolmelo)      PAR=CauaRVeloso ;;
+            ArthurFeitosa05)  PAR=Gustavormq ;;
+            Gustavormq) PAR=ArthurFeitosa05 ;;
+            *) exit 0 ;;
+          esac
+          gh pr edit "$PR" --repo "${{ github.repository }}" --add-reviewer "$PAR"
