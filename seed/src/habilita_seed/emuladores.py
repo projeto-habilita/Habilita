@@ -422,7 +422,9 @@ def verificar_integridade(config: SeedConfig, data_referencia: date) -> tuple[bo
 
     # 1. Checagem de Usuários e Claims no Auth
     usuarios_esperados = {
-        "uid_gestor_alfa": {"tenantId": "tnt_alfa", "papel": "gestor"},
+        "uid_admin_alfa": {"tenantId": "tnt_alfa", "papel": "admin_contratante"},
+        "uid_analista_alfa": {"tenantId": "tnt_alfa", "papel": "analista_sst"},
+        "uid_gestor_alfa": {"tenantId": "tnt_alfa", "papel": "admin_contratante"},
         "uid_porteiro_alfa": {"tenantId": "tnt_alfa", "papel": "porteiro"},
         "uid_terc_alfa_1": {
             "tenantId": "tnt_alfa",
@@ -434,7 +436,9 @@ def verificar_integridade(config: SeedConfig, data_referencia: date) -> tuple[bo
             "papel": "terceirizada",
             "terceirizadaId": "ter_alfa_2",
         },
-        "uid_gestor_beta": {"tenantId": "tnt_beta", "papel": "gestor"},
+        "uid_admin_beta": {"tenantId": "tnt_beta", "papel": "admin_contratante"},
+        "uid_analista_beta": {"tenantId": "tnt_beta", "papel": "analista_sst"},
+        "uid_gestor_beta": {"tenantId": "tnt_beta", "papel": "admin_contratante"},
         "uid_porteiro_beta": {"tenantId": "tnt_beta", "papel": "porteiro"},
         "uid_terc_beta_1": {
             "tenantId": "tnt_beta",
