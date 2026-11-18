@@ -6,7 +6,7 @@ Cobre:
 - H02.CA3: Upload de PDF válido com assinatura de bytes e metadados
 - H02.CA4: Upload rejeita tipo de mídia não suportado com 415
 - H02.CA5: Upload acima de 5.000.000 bytes rejeitado com 413
-- H02.CA6: CPF com dígitos verificadores inválidos rejeitado com 422
+- H02.CA6: CPF com dígitos verificadores inválidos rejeitado com 400
 - H02.CA7: Tentativa de cadastrar CPF duplicado no mesmo tenant retorna 409
 - H02.CA8: Alocação em contrato inexistente retorna 404
 - H02.CA9: Upload com tipoDocumentoId inexistente no tenant retorna 404
@@ -15,7 +15,7 @@ Cobre:
 - H03.CA2: Analista aprova e rejeita documento com justificativa válida
 - H03.CA3: Terceirizada proibida de aprovar documento (403)
 - H03.CA4: Tentativa de aprovar documento que não está PENDENTE retorna 409
-- H03.CA5: Rejeição com motivo menor que 10 caracteres retorna 422
+- H03.CA5: Rejeição com motivo menor que 10 caracteres retorna 400
 - H03.CA6: Isolamento horizontal de trabalhador e documento de outro tenant (404)
 - H03.CA7: Isolamento intra-tenant de trabalhador para terceirizada distinta (404)
 """
@@ -153,18 +153,18 @@ def test_h02_ca5_upload_excede_5mb_retorna_413(
     assert resp.json().get("status") == 413
 
 
-def test_h02_ca6_cpf_digitos_invalidos_retorna_422(
+def test_h02_ca6_cpf_digitos_invalidos_retorna_400(
     client: TestClient,
     headers_admin_alfa: dict[str, str],
 ) -> None:
-    """CPF com dígitos verificadores matematicamente incorretos é rejeitado com HTTP 422."""
+    """CPF com dígitos verificadores matematicamente incorretos é rejeitado com HTTP 400."""
     payload = {
         "nome": "Trabalhador CPF Falso",
         "cpf": "123.456.789-01",  # Dígitos 01 são inválidos para essa raiz
         "terceirizadaId": TER_ALFA_1,
     }
     resp = client.post("/trabalhadores", json=payload, headers=headers_admin_alfa)
-    assert resp.status_code == 422
+    assert resp.status_code == 400
     assert "application/problem+json" in resp.headers.get("content-type", "")
 
 
@@ -315,12 +315,12 @@ def test_h03_ca4_aprovacao_documento_nao_pendente_retorna_409(
     assert resp.json().get("status") == 409
 
 
-def test_h03_ca5_rejeicao_motivo_menor_que_10_chars_retorna_422(
+def test_h03_ca5_rejeicao_motivo_menor_que_10_chars_retorna_400(
     client: TestClient,
     headers_analista_alfa: dict[str, str],
     headers_terceirizada_1_alfa: dict[str, str],
 ) -> None:
-    """Justificativa de rejeição com menos de 10 caracteres é rejeitada com HTTP 422."""
+    """Justificativa de rejeição com menos de 10 caracteres é rejeitada com HTTP 400."""
     # Cria doc pendente
     resp_doc = client.post(
         f"/trabalhadores/{TRB_ALFA_1}/documentos",
@@ -335,7 +335,7 @@ def test_h03_ca5_rejeicao_motivo_menor_que_10_chars_retorna_422(
         json={"motivo": "curto"},  # 5 caracteres < 10
         headers=headers_analista_alfa,
     )
-    assert resp.status_code == 422
+    assert resp.status_code == 400
     assert "application/problem+json" in resp.headers.get("content-type", "")
 
 

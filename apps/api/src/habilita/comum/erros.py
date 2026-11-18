@@ -192,17 +192,18 @@ async def validation_exception_handler(
         mensagem = err.get("msg", "Valor inválido")
         erros.append(ErroValidacaoCampo(campo=campo, mensagem=mensagem))
 
+    # Contrato (openapi.yaml): validação de entrada responde 400 RequisicaoInvalida.
     problema = Problema(
         type="about:blank",
         title="Erro de validação",
-        status=422,
+        status=400,
         detail="Os dados enviados contêm erros de validação.",
         instance=str(request.url.path),
         requestId=request_id,
         erros=erros if erros else None,
     )
     return JSONResponse(
-        status_code=422,
+        status_code=400,
         content=problema.model_dump(exclude_none=True),
         media_type="application/problem+json",
         headers={"X-Request-Id": request_id} if request_id else {},

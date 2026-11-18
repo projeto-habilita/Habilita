@@ -1,0 +1,182 @@
+"""Testes dos critérios apontados na revisão do PR #32 (pontos 1 a 5 e 6 parcial).
+
+- H07.CA4: token válido sem claims -> 403 (não 401), log sem dados pessoais
+- H01.CA2 / H02.CA2 / H03.CA2 / H03.CA3: validação de entrada -> 400
+- H03.CA2: motivo de rejeição só com espaços é recusado
+- H02.CA8: dataEmissao no futuro -> 400
+- H02.CA10: validoAte anterior à dataEmissao -> 400
+- H01.CA6: alterar a matriz grava versão anterior e nova na auditoria
+- Download: validade da URL limitada a 300 s
+"""
+
+from __future__ import annotations
+
+import datetime
+import io
+import logging
+
+import pytest
+from fastapi.testclient import TestClient
+
+from habilita.cadastros.repositorio import CadastrosRepositorio
+from habilita.comum.auth import extrair_usuario
+from habilita.comum.erros import AppException
+from habilita.trabalhadores.repositorio import TrabalhadoresRepositorio
+
+from .conftest import CTR_ALFA_1, DOC_ALFA_1_ASO, TNT_ALFA, TRB_ALFA_1
+
+PDF = b"%PDF-1.4 teste de criterio"
+
+
+def _upload(
+    client: TestClient, headers: dict[str, str], valido_ate: str, data_emissao: str | None
+) -> int:
+    dados = {"tipoDocumentoId": "tip_aso", "validoAte": valido_ate}
+    if data_emissao is not None:
+        dados["dataEmissao"] = data_emissao
+    resp = client.post(
+        f"/trabalhadores/{TRB_ALFA_1}/documentos",
+        files={"arquivo": ("doc.pdf", io.BytesIO(PDF), "application/pdf")},
+        data=dados,
+        headers=headers,
+    )
+    return resp.status_code
+
+
+# -----------------------------------------------------------------------------
+# H07.CA4 - claims ausentes
+# -----------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "claims",
+    [
+        {"uid": "u1", "papel": "admin_contratante"},  # sem tenantId
+        {"uid": "u1", "tenantId": "tnt_alfa"},  # sem papel
+        {"uid": "u1"},  # sem nenhuma
+    ],
+)
+def test_h07_ca4_token_sem_claims_retorna_403_e_log_sem_pii(
+    claims: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr("firebase_admin.auth.verify_id_token", lambda _token: claims)
+    with caplog.at_level(logging.WARNING), pytest.raises(AppException) as exc_info:
+        extrair_usuario(authorization="Bearer qualquer")
+    assert exc_info.value.status_code == 403
+    registros = [r for r in caplog.records if getattr(r, "evento", "") == "claims_ausentes"]
+    assert registros, "evento claims_ausentes não foi registrado"
+    assert "u1" not in caplog.text
+
+
+def test_h07_ca4_token_invalido_continua_401(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _falha(_token: str) -> dict[str, str]:
+        raise ValueError("token inválido")
+
+    monkeypatch.setattr("firebase_admin.auth.verify_id_token", _falha)
+    with pytest.raises(AppException) as exc_info:
+        extrair_usuario(authorization="Bearer qualquer")
+    assert exc_info.value.status_code == 401
+
+
+# -----------------------------------------------------------------------------
+# Validação de entrada -> 400
+# -----------------------------------------------------------------------------
+def test_h01_ca2_payload_invalido_retorna_400_problem_details(
+    client: TestClient, headers_admin_alfa: dict[str, str]
+) -> None:
+    resp = client.post("/terceirizadas", json={"razaoSocial": ""}, headers=headers_admin_alfa)
+    assert resp.status_code == 400
+    assert "application/problem+json" in resp.headers.get("content-type", "")
+    assert resp.json()["status"] == 400
+
+
+# -----------------------------------------------------------------------------
+# H03.CA2 - motivo só com espaços
+# -----------------------------------------------------------------------------
+def test_h03_ca2_motivo_so_com_espacos_retorna_400(
+    client: TestClient,
+    headers_analista_alfa: dict[str, str],
+    headers_terceirizada_1_alfa: dict[str, str],
+) -> None:
+    resp_doc = client.post(
+        f"/trabalhadores/{TRB_ALFA_1}/documentos",
+        files={"arquivo": ("doc.pdf", io.BytesIO(PDF), "application/pdf")},
+        data={"tipoDocumentoId": "tip_aso", "validoAte": "2027-12-31"},
+        headers=headers_terceirizada_1_alfa,
+    )
+    doc_id = resp_doc.json()["id"]
+    resp = client.post(
+        f"/documentos/{doc_id}/rejeicao",
+        json={"motivo": "               "},
+        headers=headers_analista_alfa,
+    )
+    assert resp.status_code == 400
+
+
+# -----------------------------------------------------------------------------
+# H02.CA8 / H02.CA10 - datas do upload
+# -----------------------------------------------------------------------------
+def test_h02_ca8_data_emissao_no_futuro_retorna_400(
+    client: TestClient, headers_terceirizada_1_alfa: dict[str, str]
+) -> None:
+    futuro = (datetime.date.today() + datetime.timedelta(days=5)).isoformat()
+    assert _upload(client, headers_terceirizada_1_alfa, "2099-12-31", futuro) == 400
+
+
+def test_h02_ca10_valido_ate_anterior_a_emissao_retorna_400(
+    client: TestClient, headers_terceirizada_1_alfa: dict[str, str]
+) -> None:
+    assert _upload(client, headers_terceirizada_1_alfa, "2026-01-01", "2026-06-01") == 400
+
+
+def test_h02_upload_data_em_formato_invalido_retorna_400(
+    client: TestClient, headers_terceirizada_1_alfa: dict[str, str]
+) -> None:
+    assert _upload(client, headers_terceirizada_1_alfa, "31/12/2027", None) == 400
+
+
+def test_h02_upload_datas_validas_continua_201(
+    client: TestClient, headers_terceirizada_1_alfa: dict[str, str]
+) -> None:
+    assert _upload(client, headers_terceirizada_1_alfa, "2027-06-30", "2026-06-30") == 201
+
+
+# -----------------------------------------------------------------------------
+# H01.CA6 - auditoria da matriz
+# -----------------------------------------------------------------------------
+def test_h01_ca6_alterar_matriz_registra_versao_anterior_e_nova_na_auditoria(
+    client: TestClient, headers_admin_alfa: dict[str, str]
+) -> None:
+    repo = CadastrosRepositorio(tenant_id=TNT_ALFA)
+    antes = len(repo.listar_auditoria())
+
+    resp = client.put(
+        f"/contratos/{CTR_ALFA_1}/exigencias",
+        json={"tipoDocumentoIds": ["tip_aso"]},
+        headers=headers_admin_alfa,
+    )
+    assert resp.status_code == 200
+    versao_nova = resp.json()["versaoMatriz"]
+
+    eventos = repo.listar_auditoria()
+    assert len(eventos) == antes + 1
+    ev = eventos[-1]
+    assert ev["tipo"] == "MATRIZ_EXIGENCIAS_ALTERADA"
+    assert ev["contratoId"] == CTR_ALFA_1
+    assert ev["versaoNova"] == versao_nova
+    assert ev["versaoAnterior"] == versao_nova - 1
+    assert ev["exigenciasNovas"] == ["tip_aso"]
+    assert ev["atorUid"] == "uid_admin_alfa"
+    assert "exigenciasAnteriores" in ev
+
+
+# -----------------------------------------------------------------------------
+# Download - teto de 300 s
+# -----------------------------------------------------------------------------
+def test_url_download_expira_em_no_maximo_300_segundos() -> None:
+    repo = TrabalhadoresRepositorio(tenant_id=TNT_ALFA)
+    antes = datetime.datetime.now(datetime.UTC)
+    resp = repo.gerar_url_download(DOC_ALFA_1_ASO)
+    assert resp is not None
+    expira = datetime.datetime.fromisoformat(resp.expiraEm)
+    assert (expira - antes).total_seconds() <= 301

@@ -11,6 +11,7 @@ Conforme o contrato OpenAPI e ADR 0002/0006/0008:
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 from typing import Annotated, Literal
 
@@ -225,6 +226,20 @@ async def enviar_documento(
         raise recurso_nao_encontrado(
             f"Tipo de documento '{tipoDocumentoId}' não encontrado no tenant."
         )
+
+    # Datas do formulário multipart: formato ISO, H02.CA8 e H02.CA10.
+    try:
+        valido_ate_data = datetime.date.fromisoformat(validoAte)
+        data_emissao_data = datetime.date.fromisoformat(dataEmissao) if dataEmissao else None
+    except ValueError:
+        raise requisicao_invalida(
+            "Datas devem estar no formato AAAA-MM-DD (campos validoAte e dataEmissao)."
+        ) from None
+    if data_emissao_data is not None:
+        if data_emissao_data > datetime.datetime.now(datetime.UTC).date():
+            raise requisicao_invalida("dataEmissao não pode estar no futuro.")
+        if valido_ate_data < data_emissao_data:
+            raise requisicao_invalida("validoAte não pode ser anterior à dataEmissao.")
 
     conteudo = await arquivo.read()
     tamanho = len(conteudo)

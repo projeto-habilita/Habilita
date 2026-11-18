@@ -5,13 +5,13 @@ Cobre os requisitos de negócio, controle de acesso e isolamento multi-tenant:
 - H01.CA2: Terceirizada proibida de cadastrar terceirizadas (403)
 - H01.CA3: Admin cria e lista tipos de documento
 - H01.CA4: Admin cria contrato com sucesso
-- H01.CA5: Injeção de tenantId rejeitada com 422
+- H01.CA5: Injeção de tenantId rejeitada com 400
 - H01.CA6: Substituição de matriz de exigências pelo admin contratante
 - H01.CA7: Analista SST proibido de editar matriz de exigências (403)
-- H01.CA8: dataFim anterior a dataInicio rejeitada com 422
+- H01.CA8: dataFim anterior a dataInicio rejeitada com 400
 - H01.CA9: Isolamento horizontal de contrato (404)
 - H01.CA10: Isolamento intra-tenant de contrato para terceirizada distinta (404)
-- H01.CA11: CNPJ com dígitos verificadores inválidos rejeitado com 422
+- H01.CA11: CNPJ com dígitos verificadores inválidos rejeitado com 400
 """
 
 from __future__ import annotations
@@ -109,7 +109,7 @@ def test_h01_ca4_admin_cria_contrato_com_sucesso(
     assert ctr["exigencias"] == []
 
 
-def test_h01_ca5_injecao_tenant_id_rejeitada_com_422(
+def test_h01_ca5_injecao_tenant_id_rejeitada_com_400(
     client: TestClient,
     headers_admin_alfa: dict[str, str],
 ) -> None:
@@ -122,9 +122,9 @@ def test_h01_ca5_injecao_tenant_id_rejeitada_com_422(
         "tenantId": "tnt_beta",  # Tentativa de injeção espúria
     }
     resp = client.post("/contratos", json=payload_com_injecao, headers=headers_admin_alfa)
-    assert resp.status_code == 422
+    assert resp.status_code == 400
     assert "application/problem+json" in resp.headers.get("content-type", "")
-    assert resp.json().get("status") == 422
+    assert resp.json().get("status") == 400
 
 
 def test_h01_ca6_substituir_matriz_exigencias_contrato(
@@ -167,11 +167,11 @@ def test_h01_ca7_analista_sst_nao_pode_editar_matriz_retorna_403(
     assert resp.json().get("status") == 403
 
 
-def test_h01_ca8_data_fim_anterior_a_data_inicio_retorna_422(
+def test_h01_ca8_data_fim_anterior_a_data_inicio_retorna_400(
     client: TestClient,
     headers_admin_alfa: dict[str, str],
 ) -> None:
-    """Contrato com dataFim anterior a dataInicio é rejeitado na validação de schema (422)."""
+    """Contrato com dataFim anterior a dataInicio é rejeitado na validação de schema (400)."""
     payload_invalido = {
         "identificador": "CTR-INVALIDO-DATAS",
         "terceirizadaId": TER_ALFA_1,
@@ -179,7 +179,7 @@ def test_h01_ca8_data_fim_anterior_a_data_inicio_retorna_422(
         "dataFim": "2026-01-01",
     }
     resp = client.post("/contratos", json=payload_invalido, headers=headers_admin_alfa)
-    assert resp.status_code == 422
+    assert resp.status_code == 400
     assert "application/problem+json" in resp.headers.get("content-type", "")
 
 
@@ -206,15 +206,15 @@ def test_h01_ca10_isolamento_horizontal_terceirizada_distinta_retorna_404(
     assert "application/problem+json" in resp.headers.get("content-type", "")
 
 
-def test_h01_ca11_cnpj_digitos_invalidos_retorna_422(
+def test_h01_ca11_cnpj_digitos_invalidos_retorna_400(
     client: TestClient,
     headers_admin_alfa: dict[str, str],
 ) -> None:
-    """CNPJ com dígitos verificadores matematicamente incorretos é rejeitado com HTTP 422."""
+    """CNPJ com dígitos verificadores matematicamente incorretos é rejeitado com HTTP 400."""
     payload = {
         "razaoSocial": "Terceirizada CNPJ Invalido",
         "cnpj": "12.345.678/0001-00",  # 00 é inválido (deveria ser 95)
     }
     resp = client.post("/terceirizadas", json=payload, headers=headers_admin_alfa)
-    assert resp.status_code == 422
+    assert resp.status_code == 400
     assert "application/problem+json" in resp.headers.get("content-type", "")

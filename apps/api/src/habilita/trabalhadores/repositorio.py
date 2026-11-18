@@ -711,6 +711,9 @@ class TrabalhadoresRepositorio:
         if not doc:
             return None
 
-        expira = (datetime.datetime.now(UTC) + datetime.timedelta(minutes=15)).isoformat()
+        # TODO(#30): trocar por URL assinada do Supabase Storage (porta ArmazenamentoDocumentos).
+        # Enquanto a porta não está na main, a URL abaixo é só um placeholder do emulador,
+        # mas a validade já respeita o teto de 300 s (ADR 0006/0010).
+        expira = (datetime.datetime.now(UTC) + datetime.timedelta(seconds=300)).isoformat()
         url = f"http://127.0.0.1:9199/download/storage/v1/b/demo-habilita.appspot.com/o/tenants%2F{self.tenant_id}%2Fdocumentos%2F{documento_id}.pdf?alt=media"
         return UrlDownloadResponse(url=url, expiraEm=expira)

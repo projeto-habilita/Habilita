@@ -4,7 +4,7 @@ Cobre:
 - /healthz e /readyz respondendo sem login (HTTP 200)
 - /me respondendo dados do usuário conforme claims (HTTP 200)
 - /me respondendo HTTP 401 Problem Details sem header Authorization
-- Extra fields rejeitados com HTTP 422 Problem Details (extra="forbid")
+- Extra fields rejeitados com HTTP 400 Problem Details (extra="forbid")
 - Limite de paginação obedecido e refletido nas respostas
 """
 
@@ -54,21 +54,21 @@ def test_me_sem_token_retorna_401_problem_details(client: TestClient) -> None:
     assert "title" in corpo
 
 
-def test_corpo_invalido_com_campos_extras_retorna_422_problem_details(
+def test_corpo_invalido_com_campos_extras_retorna_400_problem_details(
     client: TestClient,
     headers_gestor_alfa: dict[str, str],
 ) -> None:
-    """Campos extras são expressamente proibidos (extra='forbid') gerando HTTP 422."""
+    """Campos extras são expressamente proibidos (extra='forbid') gerando HTTP 400."""
     payload_invalido = {
         "nome": "Tipo Válido",
         "obrigatorio": True,
         "campo_fantasma_malicioso": "proibido",
     }
     resp = client.post("/tipos-documento", json=payload_invalido, headers=headers_gestor_alfa)
-    assert resp.status_code == 422
+    assert resp.status_code == 400
     assert "application/problem+json" in resp.headers.get("content-type", "")
     corpo = resp.json()
-    assert corpo.get("status") == 422
+    assert corpo.get("status") == 400
     assert "extra inputs are not permitted" in str(corpo).lower()
 
 

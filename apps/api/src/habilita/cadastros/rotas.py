@@ -191,7 +191,7 @@ def substituir_exigencias_contrato(
         if not repo.obter_tipo_documento(tid):
             raise recurso_nao_encontrado(f"Tipo de documento '{tid}' não encontrado no tenant.")
 
-    contrato = repo.substituir_exigencias(contrato_id, payload.tipoDocumentoIds)
+    contrato = repo.substituir_exigencias(contrato_id, payload.tipoDocumentoIds, usuario.uid)
     if not contrato:
         raise recurso_nao_encontrado(f"Contrato '{contrato_id}' não encontrado.")
     return contrato

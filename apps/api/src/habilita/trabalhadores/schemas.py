@@ -139,6 +139,12 @@ class RejeitarDocumentoPayload(BaseModel):
 
     motivo: str = Field(min_length=10, max_length=500)
 
+    @field_validator("motivo", mode="before")
+    @classmethod
+    def _aparar_motivo(cls, v: object) -> object:
+        """H03.CA2: espaços nas pontas não contam para o mínimo de 10 caracteres."""
+        return v.strip() if isinstance(v, str) else v
+
 
 class UrlDownloadResponse(BaseModel):
     """URL assinada para download temporário do documento."""

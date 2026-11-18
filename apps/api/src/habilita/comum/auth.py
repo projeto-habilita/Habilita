@@ -9,12 +9,15 @@ Conforme a ADR 0002 e o AGENTS.md:
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Annotated, Any
 
 from fastapi import Depends, Header
 
 from habilita.comum.erros import acesso_proibido, nao_autenticado
+
+logger = logging.getLogger(__name__)
 
 
 class UsuarioAutenticado:
@@ -48,29 +51,34 @@ def extrair_usuario(
 
     token = authorization.removeprefix("Bearer ").strip()
 
-    # Autenticação real com Firebase Admin SDK
+    # Autenticação real com Firebase Admin SDK. Só a verificação do token vira 401.
     try:
         from firebase_admin import auth  # type: ignore[import-untyped]
 
         decoded_claims: dict[str, Any] = auth.verify_id_token(token)
-        uid = str(decoded_claims.get("uid", decoded_claims.get("user_id", "")))
-        tenant_id = decoded_claims.get("tenantId")
-        papel = decoded_claims.get("papel")
-        terceirizada_id = decoded_claims.get("terceirizadaId")
-
-        if not tenant_id or not papel:
-            raise nao_autenticado(
-                "Token não contém as custom claims necessárias (tenantId, papel)."
-            )
-
-        return UsuarioAutenticado(
-            uid=uid,
-            tenant_id=str(tenant_id),
-            papel=str(papel),
-            terceirizada_id=str(terceirizada_id) if terceirizada_id else None,
-        )
     except Exception as exc:
         raise nao_autenticado(f"Falha ao validar token Firebase: {exc}") from exc
+
+    uid = str(decoded_claims.get("uid", decoded_claims.get("user_id", "")))
+    tenant_id = decoded_claims.get("tenantId")
+    papel = decoded_claims.get("papel")
+    terceirizada_id = decoded_claims.get("terceirizadaId")
+
+    # H07.CA4: token válido, mas sem claims de autorização -> 403 (não 401).
+    # O log registra só o motivo, sem uid, e-mail ou qualquer dado pessoal.
+    if not tenant_id or not papel:
+        logger.warning(
+            "Acesso negado: token sem claims obrigatórias",
+            extra={"evento": "claims_ausentes", "tenantId": bool(tenant_id), "papel": bool(papel)},
+        )
+        raise acesso_proibido("Token não contém as custom claims necessárias (tenantId, papel).")
+
+    return UsuarioAutenticado(
+        uid=uid,
+        tenant_id=str(tenant_id),
+        papel=str(papel),
+        terceirizada_id=str(terceirizada_id) if terceirizada_id else None,
+    )
 
 
 def exigir_papeis(*papeis_permitidos: str) -> Callable[[UsuarioAutenticado], UsuarioAutenticado]:

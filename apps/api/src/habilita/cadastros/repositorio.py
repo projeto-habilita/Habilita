@@ -98,6 +98,8 @@ _BANCO_TIPOS_DOCUMENTO: dict[str, dict[str, dict[str, Any]]] = {
     },
 }
 
+_BANCO_AUDITORIA: dict[str, list[dict[str, Any]]] = {}
+
 _BANCO_CONTRATOS: dict[str, dict[str, dict[str, Any]]] = {
     "tnt_alfa": {
         "ctr_alfa_1": {
@@ -445,8 +447,31 @@ class CadastrosRepositorio:
 
         return self._montar_contrato(registro)
 
+    def _registrar_auditoria(self, evento: dict[str, Any]) -> None:
+        """Grava um evento em tenants/{tenantId}/auditoria/{id}, sem dados pessoais."""
+        evento_id = f"aud_{uuid.uuid4().hex[:12]}"
+        registro = {
+            "id": evento_id,
+            "em": datetime.datetime.now(UTC).isoformat(),
+            **evento,
+        }
+        if self.db is not None:
+            self._tenant_ref().collection("auditoria").document(evento_id).set(registro)
+        elif get_settings().app_env != "local":
+            raise RuntimeError("Armazenamento em memória não é permitido fora de ENV=local.")
+        if get_settings().app_env == "local":
+            _BANCO_AUDITORIA.setdefault(self.tenant_id, []).append(registro)
+
+    def listar_auditoria(self) -> list[dict[str, Any]]:
+        """Eventos de auditoria do tenant, do mais antigo ao mais recente."""
+        if self.db is not None:
+            col = self._tenant_ref().collection("auditoria")
+            eventos = [d.to_dict() for d in col.order_by("em").stream()]
+            return [e for e in eventos if e is not None]
+        return list(_BANCO_AUDITORIA.get(self.tenant_id, []))
+
     def substituir_exigencias(
-        self, contrato_id: str, tipo_documento_ids: list[str]
+        self, contrato_id: str, tipo_documento_ids: list[str], ator_uid: str | None = None
     ) -> Contrato | None:
         novas_exigencias: list[dict[str, Any]] = []
         for tid in list(dict.fromkeys(tipo_documento_ids)):
@@ -460,6 +485,23 @@ class CadastrosRepositorio:
                     }
                 )
 
+        def _auditar(anterior: dict[str, Any], versao_nova: int) -> None:
+            # H01.CA6: guarda a versão anterior e a nova da matriz.
+            self._registrar_auditoria(
+                {
+                    "tipo": "MATRIZ_EXIGENCIAS_ALTERADA",
+                    "contratoId": contrato_id,
+                    "atorUid": ator_uid,
+                    "versaoAnterior": int(anterior.get("versaoMatriz", 0)),
+                    "versaoNova": versao_nova,
+                    "exigenciasAnteriores": [
+                        str(e.get("id")) if isinstance(e, dict) else str(e)
+                        for e in anterior.get("exigencias", [])
+                    ],
+                    "exigenciasNovas": [e["id"] for e in novas_exigencias],
+                }
+            )
+
         if self.db is not None:
             doc_ref = self._tenant_ref().collection("contratos").document(contrato_id)
             snap = doc_ref.get()
@@ -467,6 +509,7 @@ class CadastrosRepositorio:
                 dados = snap.to_dict() or {}
                 nova_versao = int(dados.get("versaoMatriz", 0)) + 1
                 doc_ref.update({"exigencias": novas_exigencias, "versaoMatriz": nova_versao})
+                _auditar(dados, nova_versao)
                 dados["exigencias"] = novas_exigencias
                 dados["versaoMatriz"] = nova_versao
                 return self._montar_contrato(dados)
@@ -481,6 +524,8 @@ class CadastrosRepositorio:
         if not dados_mem:
             return None
 
+        nova_versao_mem = dados_mem.get("versaoMatriz", 0) + 1
+        _auditar(dados_mem, nova_versao_mem)
         dados_mem["exigencias"] = novas_exigencias
-        dados_mem["versaoMatriz"] = dados_mem.get("versaoMatriz", 0) + 1
+        dados_mem["versaoMatriz"] = nova_versao_mem
         return self._montar_contrato(dados_mem)
