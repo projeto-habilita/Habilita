@@ -4,7 +4,7 @@
 # Construir a partir da RAIZ do repositório (veja o docker-compose.yml).
 
 # node:24.22.0-trixie-slim (Node 24 "Krypton", LTS ativa)
-FROM node:24.22.0-trixie-slim@sha256:7f486cabe892bff8fef04c0f7da8dba84a560be3e4e2740b7a86afc57ebec315
+FROM node:24.22.3-trixie-slim@sha256:af02d57b57719b9657a45199a79264a9437940cd55b3c7b3fc99615654f124a0
 
 # - JRE 21 headless (sem interface gráfica): o firebase-tools 15.x exige Java 21 ou mais novo
 #   para o emulador do Firestore (MIN_SUPPORTED_JAVA_MAJOR_VERSION = 21 no código dele).
