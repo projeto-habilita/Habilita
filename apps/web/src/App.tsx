@@ -80,7 +80,7 @@ function HealthBlock() {
     setTentativas((atual) => atual + 1)
   }
 
-    return (
+  return (
     <section aria-live="polite">
       <h2>Estado da API</h2>
 
