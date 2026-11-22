@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ErrorState } from './components/ErrorState'
 import { FormField } from './components/FormField'
+import { LoadingState } from './components/LoadingState'
 
 type HealthState =
   { kind: 'loading' } | { kind: 'success'; status: string } | { kind: 'error'; message: string }
@@ -83,8 +84,8 @@ function HealthBlock() {
     <section aria-live="polite">
       <h2>Estado da API</h2>
 
-      {state.kind === 'loading' && <p>Carregando informações...</p>}
-
+      {state.kind === 'loading' && <LoadingState message="Verificando conexão com a API..." />}
+      
       {state.kind === 'success' && <p>API no ar: {state.status}</p>}
 
       {state.kind === 'error' && <ErrorState message={state.message} onRetry={tentarNovamente} />}

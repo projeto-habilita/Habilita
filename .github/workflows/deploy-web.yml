@@ -1,0 +1,140 @@
+# Publicação contínua do frontend (React + Vite SPA) no Firebase Hosting.
+# - `preview`: gera canal temporário (7 dias) para PRs originados do próprio repositório.
+# - `live`: publica no canal de produção (`live`) após conclusão bem-sucedida do workflow `CI` na `main`.
+name: Deploy Web (Firebase Hosting)
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+# Permissões mínimas para ler o código, publicar checks e comentar a URL de preview no PR.
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+# Agrupa execuções por referência; cancela previews antigos em PRs sem interromper deploys de produção.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.workflow_run.head_branch || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  preview:
+    name: preview
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validar configuração de deploy (variáveis e segredos)
+        env:
+          CHECK_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+          CHECK_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          CHECK_API_URL: ${{ vars.API_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CHECK_PROJECT_ID}" ]; then
+            echo "::error::Configuração obrigatória ausente: defina a variável FIREBASE_PROJECT_ID em Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          if [ -z "${CHECK_SERVICE_ACCOUNT}" ]; then
+            echo "::error::Configuração obrigatória ausente: defina o secret FIREBASE_SERVICE_ACCOUNT em Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          if [ -z "${CHECK_API_URL}" ]; then
+            echo "::warning::Variável API_URL não configurada: não há API pública ativa no momento (débito do CP3); o deploy do frontend no Firebase Hosting será apenas visual."
+          fi
+
+      - name: Configurar Node.js (versão sincronizada com apps/web/.nvmrc)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: "apps/web/.nvmrc"
+          cache: "npm"
+          cache-dependency-path: "apps/web/package-lock.json"
+
+      - name: Instalar dependências do frontend (npm ci congelado e sem scripts)
+        working-directory: apps/web
+        run: npm ci --ignore-scripts
+
+      - name: Compilar frontend (Vite build)
+        working-directory: apps/web
+        env:
+          VITE_API_URL: ${{ vars.API_URL }}
+        run: npm run build
+
+      - name: Publicar canal de preview no Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@500ac625ca2dd40cbd15f7659af953801858032a # v0.11.0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          projectId: ${{ vars.FIREBASE_PROJECT_ID }}
+          expires: 7d
+
+  live:
+    name: live
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
+    steps:
+      - name: Checkout (commit validado pelo CI)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
+      - name: Validar configuração de deploy (variáveis e segredos)
+        env:
+          CHECK_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+          CHECK_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          CHECK_API_URL: ${{ vars.API_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CHECK_PROJECT_ID}" ]; then
+            echo "::error::Configuração obrigatória ausente: defina a variável FIREBASE_PROJECT_ID em Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          if [ -z "${CHECK_SERVICE_ACCOUNT}" ]; then
+            echo "::error::Configuração obrigatória ausente: defina o secret FIREBASE_SERVICE_ACCOUNT em Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          if [ -z "${CHECK_API_URL}" ]; then
+            echo "::warning::Variável API_URL não configurada: não há API pública ativa no momento (débito do CP3); o deploy do frontend no Firebase Hosting será apenas visual."
+          fi
+
+      - name: Configurar Node.js (versão sincronizada com apps/web/.nvmrc)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: "apps/web/.nvmrc"
+          cache: "npm"
+          cache-dependency-path: "apps/web/package-lock.json"
+
+      - name: Instalar dependências do frontend (npm ci congelado e sem scripts)
+        working-directory: apps/web
+        run: npm ci --ignore-scripts
+
+      - name: Compilar frontend (Vite build)
+        working-directory: apps/web
+        env:
+          VITE_API_URL: ${{ vars.API_URL }}
+        run: npm run build
+
+      - name: Publicar produção (live) no Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@500ac625ca2dd40cbd15f7659af953801858032a # v0.11.0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          projectId: ${{ vars.FIREBASE_PROJECT_ID }}
+          channelId: live

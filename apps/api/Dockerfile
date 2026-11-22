@@ -1,19 +1,19 @@
 # Imagem da API do Habilita. Dois alvos (`--target`):
 #   dev  -> recarrega sozinha ao editar o código (usada no docker compose)
-#   prod -> enxuta, sem ferramentas de desenvolvimento (será usada no Cloud Run)
+#   prod -> enxuta, sem ferramentas de desenvolvimento (será usada no Render e execução local)
 # Versões fixadas por tag exata + digest (sha256) para o build ser reproduzível.
 
 # uv 0.13.1 (gerenciador de dependências Python)
-FROM ghcr.io/astral-sh/uv:0.13.1@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.9@sha256:d3b601f0c7b118bc1753febf7c41cc80981df678445e0254284eecf84db79a7d AS uv
 
 # ---------------------------------------------------------------------
 # base: Python 3.12.15 (Debian 13 "trixie") comum a todos os estágios
 # ---------------------------------------------------------------------
 # python:3.12.15-slim
-FROM python:3.12.15-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS base
+FROM python:3.12.16-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS base
 
 # - sem .pyc (menos lixo) e logs sem buffer (aparecem na hora no `docker logs`)
-# - PORT: porta da API (o Cloud Run também injeta PORT); padrão 8000
+# - PORT: porta da API (Render e execução local usam PORT); padrão 8000
 # - /opt/venv: ambiente virtual com as dependências, fora de /app para o volume não sobrescrevê-lo
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
