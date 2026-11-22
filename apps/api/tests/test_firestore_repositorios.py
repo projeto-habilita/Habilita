@@ -229,6 +229,7 @@ def test_bloqueio_fallback_memoria_fora_de_local(monkeypatch: pytest.MonkeyPatch
     """Valida bloqueio estrito de memória fora de ENV=local (BE-01, BE-04)."""
     monkeypatch.setenv("APP_ENV", "prod")
     monkeypatch.setenv("CPF_HMAC_KEY", "chave-secreta-de-producao-longa")
+    monkeypatch.setenv("SUPABASE_SERVICE_KEY", "chave-de-teste-prod-nao-demo")
     monkeypatch.setenv("CORS_ORIGINS", "https://app.habilita.com.br")
 
     # 1. Sem conexão com Firestore, instanciar repositório falha imediatamente
@@ -286,6 +287,7 @@ def test_cpf_hmac_key_e_env_alias(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Fora de local com chave real e HTTPS, é aceito
     monkeypatch.setenv("CPF_HMAC_KEY", "chave-secreta-producao-longa")
+    monkeypatch.setenv("SUPABASE_SERVICE_KEY", "chave-de-teste-prod-nao-demo")
     monkeypatch.setenv("CORS_ORIGINS", "https://app.habilita.com.br")
     s_prod = Settings()
     assert s_prod.app_env == "prod"

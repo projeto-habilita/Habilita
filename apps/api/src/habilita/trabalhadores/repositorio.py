@@ -18,10 +18,17 @@ from typing import Any
 
 from google.cloud.firestore import Client as FirestoreClient
 
+from habilita.armazenamento import (
+    ArmazenamentoDocumentos,
+    ArmazenamentoError,
+    ObjetoNaoEncontradoError,
+    SupabaseArmazenamento,
+    construir_caminho,
+)
 from habilita.cadastros.repositorio import CadastrosRepositorio
 from habilita.comum.erros import conflito, recurso_nao_encontrado
 from habilita.comum.firestore import obter_firestore_client
-from habilita.config import get_settings
+from habilita.config import CHAVE_DEMO_SUPABASE, get_settings
 from habilita.trabalhadores.schemas import (
     Alocacao,
     ArquivoMetadados,
@@ -33,6 +40,13 @@ from habilita.trabalhadores.schemas import (
 )
 
 UTC = getattr(datetime, "UTC", datetime.timezone.utc)  # noqa: UP017
+
+
+def _derivar_uuid_arquivo(tenant_id: str, trabalhador_id: str, documento_id: str) -> str:
+    """Deriva UUID v5 determinístico idêntico ao seed para documentos sem caminho explícito."""
+    nome = f"habilita://{tenant_id}/{trabalhador_id}/{documento_id}"
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, nome))
+
 
 _BANCO_TRABALHADORES: dict[str, dict[str, dict[str, Any]]] = {
     "tnt_alfa": {
@@ -82,6 +96,12 @@ _BANCO_DOCUMENTOS: dict[str, dict[str, dict[str, Any]]] = {
             "motivoRejeicao": None,
             "situacaoValidade": "VALIDO",
             "arquivo": {
+                "caminho": construir_caminho(
+                    "tnt_alfa",
+                    "trb_alfa_1",
+                    "doc_alfa_1_aso",
+                    f"{_derivar_uuid_arquivo('tnt_alfa', 'trb_alfa_1', 'doc_alfa_1_aso')}.pdf",
+                ),
                 "contentType": "application/pdf",
                 "tamanhoBytes": 1024,
                 "sha256": hashlib.sha256(b"conteudo-ficticio-alfa-1").hexdigest(),
@@ -101,6 +121,12 @@ _BANCO_DOCUMENTOS: dict[str, dict[str, dict[str, Any]]] = {
             "motivoRejeicao": None,
             "situacaoValidade": "VALIDO",
             "arquivo": {
+                "caminho": construir_caminho(
+                    "tnt_beta",
+                    "trb_beta_1",
+                    "doc_beta_1_aso",
+                    f"{_derivar_uuid_arquivo('tnt_beta', 'trb_beta_1', 'doc_beta_1_aso')}.pdf",
+                ),
                 "contentType": "application/pdf",
                 "tamanhoBytes": 2048,
                 "sha256": hashlib.sha256(b"conteudo-ficticio-beta-1").hexdigest(),
@@ -113,11 +139,31 @@ _BANCO_DOCUMENTOS: dict[str, dict[str, dict[str, Any]]] = {
 class TrabalhadoresRepositorio:
     """Repositório isolado por tenant com persistência no Firestore."""
 
-    def __init__(self, tenant_id: str, db: FirestoreClient | None = None) -> None:
+    def __init__(
+        self,
+        tenant_id: str,
+        db: FirestoreClient | None = None,
+        storage: ArmazenamentoDocumentos | None = None,
+    ) -> None:
         self.tenant_id = tenant_id
         self.db = db if db is not None else obter_firestore_client()
         if self.db is None and get_settings().app_env != "local":
             raise RuntimeError("Armazenamento em memória proibido fora de ENV=local.")
+        if storage is not None:
+            self.storage: ArmazenamentoDocumentos = storage
+        else:
+            cfg = get_settings()
+            chave_storage = cfg.supabase_service_key.get_secret_value().strip()
+            if not chave_storage and cfg.app_env == "local":
+                chave_storage = CHAVE_DEMO_SUPABASE
+            self.storage = SupabaseArmazenamento(
+                tenant_id=tenant_id,
+                base_url=cfg.storage_url,
+                service_key=chave_storage,
+                bucket=cfg.storage_bucket,
+                public_url=cfg.storage_public_url,
+                timeout_segundos=1.0 if cfg.app_env == "local" else 5.0,
+            )
 
     def _tenant_ref(self) -> Any:
         if self.db is None:
@@ -548,9 +594,9 @@ class TrabalhadoresRepositorio:
         resultado = [self._montar_documento(d) for d in itens_fatia]
         return resultado, proximo_cursor
 
-    def obter_documento(
+    def _obter_dados_documento(
         self, documento_id: str, terceirizada_id_filtro: str | None = None
-    ) -> Documento | None:
+    ) -> dict[str, Any] | None:
         dados: dict[str, Any] | None = None
         if self.db is not None:
             doc_ref = self._tenant_ref().collection("documentos").document(documento_id)
@@ -584,6 +630,14 @@ class TrabalhadoresRepositorio:
             if not trb or trb.terceirizadaId != terceirizada_id_filtro:
                 return None
 
+        return dados
+
+    def obter_documento(
+        self, documento_id: str, terceirizada_id_filtro: str | None = None
+    ) -> Documento | None:
+        dados = self._obter_dados_documento(documento_id, terceirizada_id_filtro)
+        if not dados:
+            return None
         return self._montar_documento(dados)
 
     def criar_documento(
@@ -593,9 +647,34 @@ class TrabalhadoresRepositorio:
         valido_ate: str,
         data_emissao: str | None,
         arquivo_meta: ArquivoMetadados,
+        conteudo: bytes | None = None,
     ) -> Documento:
         doc_id = f"doc_{uuid.uuid4().hex[:8]}"
         agora = datetime.datetime.now(UTC).isoformat()
+        extensao: Any = "jpg" if arquivo_meta.contentType == "image/jpeg" else "pdf"
+        arquivo_uuid = _derivar_uuid_arquivo(self.tenant_id, trabalhador_id, doc_id)
+        caminho_storage = construir_caminho(
+            self.tenant_id,
+            trabalhador_id,
+            doc_id,
+            f"{arquivo_uuid}.{extensao}",
+        )
+
+        if conteudo is not None:
+            try:
+                caminho_storage = self.storage.salvar(
+                    trabalhador_id=trabalhador_id,
+                    documento_id=doc_id,
+                    conteudo=conteudo,
+                    extensao=extensao,
+                    arquivo_uuid=arquivo_uuid,
+                )
+            except ArmazenamentoError:
+                if get_settings().app_env != "local":
+                    raise
+
+        arquivo_registro = arquivo_meta.model_dump()
+        arquivo_registro["caminho"] = caminho_storage
 
         registro = {
             "id": doc_id,
@@ -608,7 +687,7 @@ class TrabalhadoresRepositorio:
             "revisadoEm": None,
             "motivoRejeicao": None,
             "situacaoValidade": "VALIDO",
-            "arquivo": arquivo_meta.model_dump(),
+            "arquivo": arquivo_registro,
         }
 
         if self.db is not None:
@@ -707,13 +786,51 @@ class TrabalhadoresRepositorio:
     def gerar_url_download(
         self, documento_id: str, terceirizada_id_filtro: str | None = None
     ) -> UrlDownloadResponse | None:
-        doc = self.obter_documento(documento_id, terceirizada_id_filtro)
-        if not doc:
+        dados = self._obter_dados_documento(documento_id, terceirizada_id_filtro)
+        if not dados:
             return None
 
-        # TODO(#30): trocar por URL assinada do Supabase Storage (porta ArmazenamentoDocumentos).
-        # Enquanto a porta não está na main, a URL abaixo é só um placeholder do emulador,
-        # mas a validade já respeita o teto de 300 s (ADR 0006/0010).
-        expira = (datetime.datetime.now(UTC) + datetime.timedelta(seconds=300)).isoformat()
-        url = f"http://127.0.0.1:9199/download/storage/v1/b/demo-habilita.appspot.com/o/tenants%2F{self.tenant_id}%2Fdocumentos%2F{documento_id}.pdf?alt=media"
+        trabalhador_id = str(dados["trabalhadorId"])
+        arquivo_dados = dados.get("arquivo") or {}
+        content_type = (
+            arquivo_dados.get("contentType", "application/pdf")
+            if isinstance(arquivo_dados, dict)
+            else "application/pdf"
+        )
+        extensao = "jpg" if content_type == "image/jpeg" else "pdf"
+        caminho = arquivo_dados.get("caminho") if isinstance(arquivo_dados, dict) else None
+        if not caminho:
+            arquivo_uuid = _derivar_uuid_arquivo(self.tenant_id, trabalhador_id, documento_id)
+            caminho = construir_caminho(
+                self.tenant_id,
+                trabalhador_id,
+                documento_id,
+                f"{arquivo_uuid}.{extensao}",
+            )
+
+        expira_segundos = 300
+        expira = (
+            datetime.datetime.now(UTC) + datetime.timedelta(seconds=expira_segundos)
+        ).isoformat()
+        try:
+            url = self.storage.obter_url_leitura(
+                caminho=caminho,
+                expira_em_segundos=expira_segundos,
+            )
+        except ObjetoNaoEncontradoError:
+            if get_settings().app_env != "local":
+                return None
+            cfg = get_settings()
+            url = (
+                f"{cfg.storage_public_url.rstrip('/')}/object/sign/"
+                f"{cfg.storage_bucket}/{caminho}?token=local-offline&exp={expira_segundos}"
+            )
+        except ArmazenamentoError:
+            if get_settings().app_env != "local":
+                raise
+            cfg = get_settings()
+            url = (
+                f"{cfg.storage_public_url.rstrip('/')}/object/sign/"
+                f"{cfg.storage_bucket}/{caminho}?token=local-offline&exp={expira_segundos}"
+            )
         return UrlDownloadResponse(url=url, expiraEm=expira)

@@ -269,6 +269,7 @@ async def enviar_documento(
         valido_ate=validoAte,
         data_emissao=dataEmissao,
         arquivo_meta=arquivo_meta,
+        conteudo=conteudo,
     )
 
 

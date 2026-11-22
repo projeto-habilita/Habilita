@@ -118,6 +118,7 @@ def test_readyz_consulta_firestore_e_falha_quando_indisponivel(
     monkeypatch.setattr("habilita.saude.rotas.obter_firestore_client", lambda: None)
     monkeypatch.setenv("APP_ENV", "prod")
     monkeypatch.setenv("CPF_HMAC_KEY", "chave-secreta-producao-longa")
+    monkeypatch.setenv("SUPABASE_SERVICE_KEY", "chave-de-teste-prod-nao-demo")
     monkeypatch.setenv("CORS_ORIGINS", "https://app.habilita.com.br")
 
     resp_sem_banco_prod = client.get("/readyz")

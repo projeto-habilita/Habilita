@@ -171,12 +171,47 @@ def test_h01_ca6_alterar_matriz_registra_versao_anterior_e_nova_na_auditoria(
 
 
 # -----------------------------------------------------------------------------
-# Download - teto de 300 s
+# Download e Storage (Ponto 6: porta ArmazenamentoDocumentos e teto de 300 s)
 # -----------------------------------------------------------------------------
 def test_url_download_expira_em_no_maximo_300_segundos() -> None:
     repo = TrabalhadoresRepositorio(tenant_id=TNT_ALFA)
     antes = datetime.datetime.now(datetime.UTC)
     resp = repo.gerar_url_download(DOC_ALFA_1_ASO)
     assert resp is not None
+    assert "9199" not in resp.url
     expira = datetime.datetime.fromisoformat(resp.expiraEm)
     assert (expira - antes).total_seconds() <= 301
+
+
+def test_h12_ca3_upload_grava_na_porta_armazenamento_e_gera_url_assinada_300s() -> None:
+    """Valida gravação via ArmazenamentoDocumentos e URL assinada de 300s."""
+    from habilita.trabalhadores.schemas import ArquivoMetadados
+
+    from .memoria_armazenamento import MemoriaArmazenamento
+
+    storage_fake = MemoriaArmazenamento(tenant_id=TNT_ALFA, public_url="http://127.0.0.1:5000")
+    repo = TrabalhadoresRepositorio(tenant_id=TNT_ALFA, storage=storage_fake)
+    conteudo = b"%PDF-1.4 documento persistido via porta"
+    meta = ArquivoMetadados(
+        contentType="application/pdf",
+        tamanhoBytes=len(conteudo),
+        sha256="a" * 64,
+    )
+
+    doc = repo.criar_documento(
+        trabalhador_id=TRB_ALFA_1,
+        tipo_documento_id="tip_aso",
+        valido_ate="2027-12-31",
+        data_emissao="2026-06-01",
+        arquivo_meta=meta,
+        conteudo=conteudo,
+    )
+
+    resp_url = repo.gerar_url_download(doc.id)
+    assert resp_url is not None
+    prefixo = (
+        f"http://127.0.0.1:5000/mock-signed/tenants/{TNT_ALFA}/"
+        f"trabalhadores/{TRB_ALFA_1}/documentos/{doc.id}/"
+    )
+    assert resp_url.url.startswith(prefixo)
+    assert resp_url.url.endswith(".pdf?exp=300")
