@@ -23,6 +23,7 @@ from habilita.cadastros.schemas import (
     Terceirizada,
     TipoDocumento,
 )
+from habilita.comum.erros import conflito
 from habilita.comum.firestore import obter_firestore_client
 from habilita.config import get_settings
 
@@ -213,6 +214,24 @@ class CadastrosRepositorio:
         )
 
     def criar_terceirizada(self, nova: NovaTerceirizada) -> Terceirizada:
+        if self.db is not None:
+            existentes_db = (
+                self._tenant_ref()
+                .collection("terceirizadas")
+                .where("cnpj", "==", nova.cnpj)
+                .limit(1)
+                .stream()
+            )
+            if any(True for _ in existentes_db):
+                raise conflito("CNPJ já cadastrado no tenant.")
+        elif get_settings().app_env != "local":
+            raise RuntimeError("Armazenamento em memória não é permitido fora de ENV=local.")
+
+        if get_settings().app_env == "local":
+            tenant_map = _BANCO_TERCEIRIZADAS.setdefault(self.tenant_id, {})
+            if any(t.get("cnpj") == nova.cnpj for t in tenant_map.values()):
+                raise conflito("CNPJ já cadastrado no tenant.")
+
         ter_id = f"ter_{uuid.uuid4().hex[:8]}"
         registro = {
             "id": ter_id,
@@ -224,8 +243,6 @@ class CadastrosRepositorio:
 
         if self.db is not None:
             self._tenant_ref().collection("terceirizadas").document(ter_id).set(registro)
-        elif get_settings().app_env != "local":
-            raise RuntimeError("Armazenamento em memória não é permitido fora de ENV=local.")
 
         if get_settings().app_env == "local":
             tenant_map = _BANCO_TERCEIRIZADAS.setdefault(self.tenant_id, {})
@@ -424,13 +441,15 @@ class CadastrosRepositorio:
 
     def criar_contrato(self, novo: NovoContrato) -> Contrato:
         ctr_id = f"ctr_{uuid.uuid4().hex[:8]}"
+        hoje_iso = datetime.datetime.now(UTC).date().isoformat()
+        vigente = novo.dataFim >= hoje_iso
         registro = {
             "id": ctr_id,
             "identificador": novo.identificador,
             "terceirizadaId": novo.terceirizadaId,
             "dataInicio": novo.dataInicio,
             "dataFim": novo.dataFim,
-            "vigente": True,
+            "vigente": vigente,
             "versaoMatriz": 0,
             "exigencias": [],
             "criadoEm": datetime.datetime.now(UTC).isoformat(),

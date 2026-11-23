@@ -69,7 +69,19 @@ def test_h02_ca2_vincular_trabalhador_ao_contrato(
     headers_admin_alfa: dict[str, str],
 ) -> None:
     """Valida alocação de trabalhador em contrato existente."""
-    payload = {"trabalhadorId": TRB_ALFA_1}
+    resp_trb = client.post(
+        "/trabalhadores",
+        json={
+            "nome": "Trabalhador Alocacao Contrato",
+            "cpf": "39053344705",
+            "terceirizadaId": TER_ALFA_1,
+        },
+        headers=headers_admin_alfa,
+    )
+    assert resp_trb.status_code == 201
+    trb_id = resp_trb.json()["id"]
+
+    payload = {"trabalhadorId": trb_id}
     resp = client.post(
         f"/contratos/{CTR_ALFA_1}/alocacoes",
         json=payload,
@@ -78,7 +90,7 @@ def test_h02_ca2_vincular_trabalhador_ao_contrato(
     assert resp.status_code == 201
     aloc = resp.json()
     assert aloc["contratoId"] == CTR_ALFA_1
-    assert aloc["trabalhadorId"] == TRB_ALFA_1
+    assert aloc["trabalhadorId"] == trb_id
     assert aloc["semaforo"] in ("VERDE", "AMARELO", "VERMELHO")
 
 

@@ -215,3 +215,116 @@ def test_h12_ca3_upload_grava_na_porta_armazenamento_e_gera_url_assinada_300s() 
     )
     assert resp_url.url.startswith(prefixo)
     assert resp_url.url.endswith(".pdf?exp=300")
+
+
+# -----------------------------------------------------------------------------
+# H01.CA3 / H08.CA3 / H10.CA3 / H13.CA3 - lacunas da suíte complementar (#102)
+# -----------------------------------------------------------------------------
+def test_h01_ca3_contrato_com_data_fim_no_passado_nao_fica_vigente(
+    client: TestClient, headers_admin_alfa: dict[str, str]
+) -> None:
+    """H01.CA3 (RN-10): contrato com dataFim no passado nasce com vigente=False."""
+    from .conftest import TER_ALFA_1
+
+    resp = client.post(
+        "/contratos",
+        json={
+            "identificador": "CTR-EXPIRADO-2025",
+            "terceirizadaId": TER_ALFA_1,
+            "dataInicio": "2025-01-01",
+            "dataFim": "2025-12-31",
+        },
+        headers=headers_admin_alfa,
+    )
+    assert resp.status_code == 201
+    assert resp.json()["vigente"] is False
+
+
+def test_h08_ca3_cnpj_duplicado_no_mesmo_tenant_retorna_409(
+    client: TestClient, headers_admin_alfa: dict[str, str]
+) -> None:
+    """H08.CA3: cadastro de terceirizada com CNPJ já existente no tenant retorna 409."""
+    payload = {
+        "razaoSocial": "Terceirizada Duplicada LTDA",
+        "cnpj": "11.444.777/0001-61",
+    }
+    resp_1 = client.post("/terceirizadas", json=payload, headers=headers_admin_alfa)
+    assert resp_1.status_code == 201
+
+    resp_2 = client.post("/terceirizadas", json=payload, headers=headers_admin_alfa)
+    assert resp_2.status_code == 409
+    assert "application/problem+json" in resp_2.headers.get("content-type", "")
+
+
+def test_h10_ca3_vincular_trabalhador_duplicado_no_mesmo_contrato_retorna_409(
+    client: TestClient, headers_admin_alfa: dict[str, str]
+) -> None:
+    """H10.CA3: vincular o mesmo trabalhador duas vezes no mesmo contrato retorna 409."""
+    from .conftest import TER_ALFA_1
+
+    resp_ctr = client.post(
+        "/contratos",
+        json={
+            "identificador": "CTR-ALOC-DUP-PR32",
+            "terceirizadaId": TER_ALFA_1,
+            "dataInicio": "2026-01-01",
+            "dataFim": "2027-12-31",
+        },
+        headers=headers_admin_alfa,
+    )
+    assert resp_ctr.status_code == 201
+    ctr_id = resp_ctr.json()["id"]
+
+    resp_1 = client.post(
+        f"/contratos/{ctr_id}/alocacoes",
+        json={"trabalhadorId": TRB_ALFA_1},
+        headers=headers_admin_alfa,
+    )
+    assert resp_1.status_code == 201
+
+    resp_2 = client.post(
+        f"/contratos/{ctr_id}/alocacoes",
+        json={"trabalhadorId": TRB_ALFA_1},
+        headers=headers_admin_alfa,
+    )
+    assert resp_2.status_code == 409
+    assert "application/problem+json" in resp_2.headers.get("content-type", "")
+
+
+def test_h13_ca3_aprovar_documento_com_valido_ate_anterior_data_emissao_retorna_400(
+    client: TestClient,
+    headers_terceirizada_1_alfa: dict[str, str],
+    headers_analista_alfa: dict[str, str],
+) -> None:
+    """H13.CA3 (RN-09): aprovar corrigindo validoAte < dataEmissao retorna 400."""
+    resp_up = client.post(
+        f"/trabalhadores/{TRB_ALFA_1}/documentos",
+        files={"arquivo": ("aso.pdf", io.BytesIO(PDF), "application/pdf")},
+        data={
+            "tipoDocumentoId": "tip_aso",
+            "dataEmissao": "2026-06-10",
+            "validoAte": "2027-06-10",
+        },
+        headers=headers_terceirizada_1_alfa,
+    )
+    assert resp_up.status_code == 201
+    doc_id = resp_up.json()["id"]
+
+    # 1. Override de validoAte na aprovação para data anterior à emissão -> 400
+    resp_err = client.post(
+        f"/documentos/{doc_id}/aprovacao",
+        json={"validoAte": "2026-06-01"},
+        headers=headers_analista_alfa,
+    )
+    assert resp_err.status_code == 400
+    assert "application/problem+json" in resp_err.headers.get("content-type", "")
+
+    # 2. Override válido na aprovação -> 200 e atualiza validoAte
+    resp_ok = client.post(
+        f"/documentos/{doc_id}/aprovacao",
+        json={"validoAte": "2027-12-31"},
+        headers=headers_analista_alfa,
+    )
+    assert resp_ok.status_code == 200
+    assert resp_ok.json()["statusRevisao"] == "APROVADO"
+    assert resp_ok.json()["validoAte"] == "2027-12-31"

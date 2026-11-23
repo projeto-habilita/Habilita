@@ -26,7 +26,7 @@ from habilita.armazenamento import (
     construir_caminho,
 )
 from habilita.cadastros.repositorio import CadastrosRepositorio
-from habilita.comum.erros import conflito, recurso_nao_encontrado
+from habilita.comum.erros import conflito, recurso_nao_encontrado, requisicao_invalida
 from habilita.comum.firestore import obter_firestore_client
 from habilita.config import CHAVE_DEMO_SUPABASE, get_settings
 from habilita.trabalhadores.schemas import (
@@ -476,25 +476,53 @@ class TrabalhadoresRepositorio:
         )
 
     def vincular_alocacao(self, contrato_id: str, trabalhador_id: str) -> Alocacao:
+        ja_alocado = False
         if self.db is not None:
             trb_ref = self._tenant_ref().collection("trabalhadores").document(trabalhador_id)
             snap = trb_ref.get()
             if snap.exists:
                 dados = snap.to_dict() or {}
                 alocs = list(dados.get("alocacoes", []))
-                if contrato_id not in alocs:
+                if contrato_id in alocs:
+                    ja_alocado = True
+                else:
                     alocs.append(contrato_id)
                     trb_ref.update({"alocacoes": alocs})
+            aloc_ref = (
+                self._tenant_ref()
+                .collection("contratos")
+                .document(contrato_id)
+                .collection("alocacoes")
+                .document(trabalhador_id)
+            )
+            if aloc_ref.get().exists:
+                ja_alocado = True
         elif get_settings().app_env != "local":
             raise RuntimeError("Armazenamento em memória não é permitido fora de ENV=local.")
 
         if get_settings().app_env == "local":
             tenant_map = _BANCO_TRABALHADORES.setdefault(self.tenant_id, {})
             trb = tenant_map.get(trabalhador_id)
-            if trb and contrato_id not in trb.get("alocacoes", []):
-                trb.setdefault("alocacoes", []).append(contrato_id)
+            if trb:
+                if contrato_id in trb.get("alocacoes", []):
+                    ja_alocado = True
+                else:
+                    trb.setdefault("alocacoes", []).append(contrato_id)
 
-        return self.calcular_semaforo(contrato_id, trabalhador_id)
+        if ja_alocado:
+            raise conflito("Trabalhador já está vinculado a este contrato.")
+
+        alocacao = self.calcular_semaforo(contrato_id, trabalhador_id)
+        if self.db is not None:
+            (
+                self._tenant_ref()
+                .collection("contratos")
+                .document(contrato_id)
+                .collection("alocacoes")
+                .document(trabalhador_id)
+                .set(alocacao.model_dump())
+            )
+        return alocacao
 
     @staticmethod
     def _montar_documento(dados: dict[str, Any]) -> Documento:
@@ -703,7 +731,9 @@ class TrabalhadoresRepositorio:
 
         return self._montar_documento(registro)
 
-    def aprovar_documento(self, documento_id: str) -> Documento:
+    def aprovar_documento(
+        self, documento_id: str, valido_ate_override: str | None = None
+    ) -> Documento:
         agora = datetime.datetime.now(UTC).isoformat()
         doc = self.obter_documento(documento_id)
         if not doc:
@@ -712,8 +742,21 @@ class TrabalhadoresRepositorio:
         if doc.statusRevisao != "PENDENTE":
             raise conflito("Apenas documentos com status PENDENTE podem ser aprovados.")
 
-        atualizacao = {
+        valido_ate_final = valido_ate_override or doc.validoAte
+        try:
+            dt_valido = datetime.date.fromisoformat(valido_ate_final)
+            dt_emissao = datetime.date.fromisoformat(doc.dataEmissao) if doc.dataEmissao else None
+        except ValueError:
+            raise requisicao_invalida(
+                "Datas devem estar no formato AAAA-MM-DD (validoAte e dataEmissao)."
+            ) from None
+
+        if dt_emissao is not None and dt_valido < dt_emissao:
+            raise requisicao_invalida("validoAte não pode ser anterior à dataEmissao.")
+
+        atualizacao: dict[str, Any] = {
             "statusRevisao": "APROVADO",
+            "validoAte": valido_ate_final,
             "revisadoEm": agora,
             "motivoRejeicao": None,
         }

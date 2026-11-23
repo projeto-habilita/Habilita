@@ -15,7 +15,7 @@ import datetime
 import hashlib
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
+from fastapi import APIRouter, Body, Depends, File, Form, Query, UploadFile, status
 
 from habilita.cadastros.repositorio import CadastrosRepositorio
 from habilita.cadastros.schemas import Pagina
@@ -30,6 +30,7 @@ from habilita.comum.erros import (
 from habilita.trabalhadores.repositorio import TrabalhadoresRepositorio
 from habilita.trabalhadores.schemas import (
     Alocacao,
+    AprovarDocumentoPayload,
     ArquivoMetadados,
     Documento,
     NovaAlocacao,
@@ -362,8 +363,10 @@ def aprovar_documento(
         UsuarioAutenticado,
         Depends(exigir_papeis("admin_contratante", "analista_sst")),
     ],
+    payload: Annotated[AprovarDocumentoPayload | None, Body()] = None,
 ) -> Documento:
-    return repo.aprovar_documento(documento_id)
+    valido_ate_override = payload.validoAte if payload else None
+    return repo.aprovar_documento(documento_id, valido_ate_override=valido_ate_override)
 
 
 @router.post(

@@ -132,6 +132,14 @@ class NovaAlocacao(BaseModel):
     trabalhadorId: str = Field(min_length=1)
 
 
+class AprovarDocumentoPayload(BaseModel):
+    """Payload opcional de aprovação de documento para ajuste de validade (H13 / RN-09)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    validoAte: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+
 class RejeitarDocumentoPayload(BaseModel):
     """Payload de rejeição de documento com justificativa obrigatória."""
 
