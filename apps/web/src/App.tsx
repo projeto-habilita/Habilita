@@ -89,6 +89,8 @@ function HealthBlock() {
       {state.kind === 'success' && <p>API no ar: {state.status}</p>}
 
       {state.kind === 'error' && <ErrorState message={state.message} onRetry={tentarNovamente} />}
+          </section>
+  )
 }
 
 function LoginFormPreview() {
