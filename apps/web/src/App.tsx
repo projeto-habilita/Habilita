@@ -84,17 +84,11 @@ function HealthBlock() {
     <section aria-live="polite">
       <h2>Estado da API</h2>
 
-      {state.kind === 'loading' && (
-        <LoadingState message="Verificando conexão com a API..." />
-      )}
+      {state.kind === 'loading' && <LoadingState message="Verificando conexão com a API..." />}
 
       {state.kind === 'success' && <p>API no ar: {state.status}</p>}
 
-      {state.kind === 'error' && (
-        <ErrorState message={state.message} onRetry={tentarNovamente} />
-      )}
-    </section>
-  )
+      {state.kind === 'error' && <ErrorState message={state.message} onRetry={tentarNovamente} />}
 }
 
 function LoginFormPreview() {
