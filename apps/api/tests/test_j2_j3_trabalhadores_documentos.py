@@ -57,11 +57,20 @@ def test_h02_ca1_cadastrar_e_listar_trabalhador(
     assert trb["terceirizadaId"] == TER_ALFA_1
     assert "id" in trb
 
-    # Terceirizada 1 lista e enxerga seu trabalhador
-    resp_get = client.get("/trabalhadores", headers=headers_terceirizada_1_alfa)
-    assert resp_get.status_code == 200
-    itens = resp_get.json()["itens"]
-    assert any(t["id"] == trb["id"] for t in itens)
+    # Terceirizada 1 lista e enxerga seu trabalhador (percorre todas as páginas, pois a
+    # listagem é ordenada por id e outras suítes criam trabalhadores no mesmo tenant).
+    ids_visiveis: set[str] = set()
+    cursor: str | None = None
+    for _ in range(100):
+        params = {"limite": "50", **({"cursor": cursor} if cursor else {})}
+        resp_get = client.get("/trabalhadores", params=params, headers=headers_terceirizada_1_alfa)
+        assert resp_get.status_code == 200
+        pagina = resp_get.json()
+        ids_visiveis.update(str(t["id"]) for t in pagina["itens"])
+        cursor = pagina.get("proximoCursor")
+        if not cursor:
+            break
+    assert trb["id"] in ids_visiveis
 
 
 def test_h02_ca2_vincular_trabalhador_ao_contrato(
