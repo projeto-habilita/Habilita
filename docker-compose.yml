@@ -58,7 +58,7 @@ services:
   # Executa o script de inicialização de papéis (00-init.sql) na primeira subida.
   # ---------------------------------------------------------------------------
   storage-db:
-    image: postgres:15-alpine
+    image: postgres:19-alpine
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: postgres
@@ -92,7 +92,7 @@ services:
   # Supabase Storage API (execução local com backend de arquivos em disco)
   # ---------------------------------------------------------------------------
   storage:
-    image: supabase/storage-api:v1.96.0
+    image: supabase/storage-api:v1.98.7
     depends_on:
       storage-db:
         condition: service_healthy
