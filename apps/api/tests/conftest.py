@@ -14,7 +14,7 @@ import pytest
 from fastapi import Header
 from fastapi.testclient import TestClient
 
-from habilita.comum.auth import UsuarioAutenticado, extrair_usuario
+from habilita.comum.auth import UsuarioAutenticado, definir_tenant_id_atual, extrair_usuario
 from habilita.comum.erros import nao_autenticado
 from habilita.main import app
 
@@ -66,6 +66,7 @@ def mock_extrair_usuario(
         papel = partes[2]
         terceirizada_id = partes[3] if len(partes) > 3 and partes[3] else None
         uid = partes[4] if len(partes) > 4 and partes[4] else f"uid_{papel}_{tenant_id}"
+        definir_tenant_id_atual(tenant_id)
         return UsuarioAutenticado(
             uid=uid,
             tenant_id=tenant_id,

@@ -9,6 +9,8 @@ Conforme AGENTS.md e ADR 0002/0010:
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import os
 
@@ -32,6 +34,17 @@ class EmulatorCredentials(credentials.Base):  # type: ignore[misc]
         return google.auth.credentials.AnonymousCredentials()  # type: ignore[no-untyped-call]
 
 
+def _carregar_credencial_service_account(raw_secret: str) -> credentials.Certificate | None:
+    """Decodifica credencial de conta de serviço do Firebase a partir de JSON puro ou Base64."""
+    texto = raw_secret.strip()
+    if not texto:
+        return None
+    if not texto.startswith("{"):
+        texto = base64.b64decode(texto).decode("utf-8")
+    dados = json.loads(texto)
+    return credentials.Certificate(dados)
+
+
 def obter_firebase_app() -> firebase_admin.App:
     """Inicializa ou retorna a aplicação Firebase Admin padrão."""
     try:
@@ -41,6 +54,14 @@ def obter_firebase_app() -> firebase_admin.App:
         if os.getenv("FIRESTORE_EMULATOR_HOST") or os.getenv("FIREBASE_AUTH_EMULATOR_HOST"):
             return firebase_admin.initialize_app(
                 credential=EmulatorCredentials(),
+                options={"projectId": settings.firebase_project_id},
+            )
+        cred = _carregar_credencial_service_account(
+            settings.firebase_service_account_json.get_secret_value()
+        )
+        if cred is not None:
+            return firebase_admin.initialize_app(
+                credential=cred,
                 options={"projectId": settings.firebase_project_id},
             )
         return firebase_admin.initialize_app(
