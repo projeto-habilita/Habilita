@@ -1,0 +1,76 @@
+# Agendamento diário do job idempotente de recálculo de vencimentos e expurgo (ADR 0007 §3.1 e ADR 0010 §3.2).
+# - Acionado todo dia às 06:00 UTC (03:00 em America/Sao_Paulo) ou manualmente via `workflow_dispatch`.
+# - Autenticado exclusivamente com `Authorization: Bearer <JOB_TOKEN>` (nunca impresso nos logs).
+name: Job Diário (Recálculo de Vencimentos)
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      dataReferencia:
+        description: "Data de referência opcional para o recálculo (YYYY-MM-DD)"
+        required: false
+        type: string
+
+# Menor permissão possível.
+permissions:
+  contents: read
+
+# Impede que duas execuções do job diário rodem simultaneamente.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  recalculo-vencimentos:
+    name: recalculo-vencimentos
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Executar recálculo diário de vencimentos
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          API_URL: ${{ vars.API_URL }}
+          JOB_TOKEN: ${{ secrets.JOB_TOKEN }}
+          DATA_REFERENCIA: ${{ inputs.dataReferencia }}
+        run: |
+          set -euo pipefail
+          set +x
+
+          if [ -z "${API_URL}" ]; then
+            if [ "${EVENT_NAME}" = "schedule" ]; then
+              echo "::notice::API pública não configurada, job ignorado: débito do CP3"
+              exit 0
+            fi
+            echo "::error::Configuração obrigatória ausente para execução manual: defina a variável API_URL em Settings > Secrets and variables > Actions (débito do CP3: API pública ainda não publicada)."
+            exit 1
+          fi
+
+          if [ -z "${JOB_TOKEN}" ]; then
+            echo "::error::Configuração obrigatória ausente: defina o secret JOB_TOKEN em Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+          if [ -n "${DATA_REFERENCIA}" ]; then
+            if ! [[ "${DATA_REFERENCIA}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+              echo "::error::Formato inválido para dataReferencia: informe no padrão YYYY-MM-DD."
+              exit 1
+            fi
+            payload="{\"dataReferencia\":\"${DATA_REFERENCIA}\"}"
+          else
+            payload="{}"
+          fi
+
+          url="${API_URL%/}/internal/jobs/recalculo-vencimentos"
+          echo "Disparando POST ${url} (evento: ${EVENT_NAME})..."
+
+          curl --fail --retry 3 --max-time 120 --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer ${JOB_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "${payload}" \
+            "${url}"
+
+          echo ""
+          echo "Recálculo diário concluído com sucesso."
