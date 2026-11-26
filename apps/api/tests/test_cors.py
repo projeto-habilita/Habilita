@@ -81,6 +81,7 @@ def test_cors_origins_recusa_asterisco(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_cors_origins_em_producao_exige_https_e_nao_vazio(monkeypatch: pytest.MonkeyPatch) -> None:
     """Em produção (APP_ENV=prod), CORS_ORIGINS não pode ser vazia e exige HTTPS."""
     monkeypatch.setenv("APP_ENV", "prod")
+    monkeypatch.setenv("CPF_HMAC_KEY", "chave-secreta-producao-longa")
     monkeypatch.setenv("SUPABASE_SERVICE_KEY", "chave-de-teste-prod-nao-demo")
 
     # Lista vazia é rejeitada

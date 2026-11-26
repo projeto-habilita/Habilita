@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 # Chave pública demo padrão do Supabase local (iss "supabase-demo")
@@ -21,16 +21,28 @@ CHAVE_DEMO_SUPABASE: str = (
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(extra="forbid", frozen=True)
+    model_config = SettingsConfigDict(
+        extra="forbid",
+        frozen=True,
+        populate_by_name=True,
+    )
 
-    # Ambiente em que a API roda (APP_ENV).
-    app_env: Literal["local", "ci", "prod"] = "local"
+    # Ambiente em que a API roda (APP_ENV ou ENV).
+    app_env: Literal["local", "ci", "prod"] = Field(
+        default="local",
+        validation_alias=AliasChoices("APP_ENV", "ENV"),
+    )
     # Nível de detalhe dos logs (LOG_LEVEL). Logs nunca devem ter dados pessoais.
     log_level: Literal["debug", "info", "warning", "error"] = "info"
     # Porta em que a API escuta (PORT). O Render e a execução local definem PORT.
     port: int = Field(default=8000, ge=1, le=65535)
     # ID do projeto Firebase (FIREBASE_PROJECT_ID). `demo-` roda só nos emuladores.
     firebase_project_id: str = Field(default="demo-habilita", min_length=1, max_length=64)
+    # Chave HMAC para anonimização/hashing de CPF (CPF_HMAC_KEY).
+    cpf_hmac_key: str = Field(
+        default="demo-cpf-hmac-key-for-emulator-only",
+        min_length=16,
+    )
 
     # Origens permitidas para CORS (CORS_ORIGINS).
     # NoDecode impede que o pydantic-settings tente fazer json.loads antes do validador.
@@ -61,8 +73,15 @@ class Settings(BaseSettings):
         return origens
 
     @model_validator(mode="after")
-    def validar_seguranca_cors(self) -> Settings:
-        """Garante requisitos estritos de CORS em produção (ADR 0010, exceção 2)."""
+    def validar_seguranca(self) -> Settings:
+        """Garante requisitos estritos de segurança por ambiente (BE-01, BE-03, ADR 0010)."""
+        if self.app_env != "local" and (
+            not self.cpf_hmac_key or self.cpf_hmac_key == "demo-cpf-hmac-key-for-emulator-only"
+        ):
+            raise ValueError(
+                "CPF_HMAC_KEY deve ser configurada obrigatoriamente fora do ambiente local."
+            )
+
         if self.app_env == "prod":
             if not self.cors_origins:
                 raise ValueError("Em produção (APP_ENV=prod), CORS_ORIGINS não pode ser vazia.")
