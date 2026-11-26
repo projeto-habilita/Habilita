@@ -1,5 +1,8 @@
 """Cria a aplicação FastAPI e registra as rotas e middlewares."""
 
+import json
+import logging
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 
@@ -9,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from habilita.cadastros.rotas import router as cadastros_router
+from habilita.comum.auth import _tenant_id_ctx, obter_tenant_id_atual
 from habilita.comum.erros import (
     AppException,
     app_exception_handler,
@@ -16,9 +20,12 @@ from habilita.comum.erros import (
     validation_exception_handler,
 )
 from habilita.config import get_settings
+from habilita.jobs.rotas import router as jobs_router
 from habilita.saude.rotas import router as saude_router
 from habilita.sessao.rotas import router as sessao_router
 from habilita.trabalhadores.rotas import router as trabalhadores_router
+
+request_logger = logging.getLogger("habilita.acesso")
 
 
 def create_app() -> FastAPI:
@@ -38,16 +45,33 @@ def create_app() -> FastAPI:
         allow_headers=["Authorization", "Content-Type", "If-Match"],
     )
 
-    # Middleware global para X-Request-Id (RFC e rastreabilidade)
+    # Middleware global para X-Request-Id e log estruturado em JSON (BE-07 / RFC 9457)
     @app.middleware("http")
     async def request_id_middleware(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        req_id = request.headers.get("X-Request-Id") or str(uuid.uuid4())
-        request.state.request_id = req_id
-        response = await call_next(request)
-        response.headers["X-Request-Id"] = req_id
-        return response
+        inicio = time.perf_counter()
+        token_ctx = _tenant_id_ctx.set([None])
+        try:
+            req_id = request.headers.get("X-Request-Id") or str(uuid.uuid4())
+            request.state.request_id = req_id
+            response = await call_next(request)
+            response.headers["X-Request-Id"] = req_id
+
+            latencia_ms = round((time.perf_counter() - inicio) * 1000, 2)
+            tenant_id = getattr(request.state, "tenant_id", None) or obter_tenant_id_atual()
+            registro_log = {
+                "requestId": req_id,
+                "metodo": request.method,
+                "rota": request.url.path,
+                "status": response.status_code,
+                "latenciaMs": latencia_ms,
+                "tenantId": tenant_id,
+            }
+            request_logger.info(json.dumps(registro_log, ensure_ascii=False))
+            return response
+        finally:
+            _tenant_id_ctx.reset(token_ctx)
 
     # Registro padronizado de erros Problem Details (RFC 9457)
     app.add_exception_handler(AppException, app_exception_handler)  # type: ignore[arg-type]
@@ -59,6 +83,7 @@ def create_app() -> FastAPI:
     app.include_router(sessao_router)
     app.include_router(cadastros_router)
     app.include_router(trabalhadores_router)
+    app.include_router(jobs_router)
 
     return app
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from contextvars import ContextVar
 from typing import Annotated, Any
 
 from fastapi import Depends, Header
@@ -18,6 +19,21 @@ from fastapi import Depends, Header
 from habilita.comum.erros import acesso_proibido, nao_autenticado
 
 logger = logging.getLogger(__name__)
+
+_tenant_id_ctx: ContextVar[list[str | None] | None] = ContextVar("tenant_id_ctx", default=None)
+
+
+def definir_tenant_id_atual(tenant_id: str | None) -> None:
+    """Registra o tenantId da requisição atual na caixa mutável compartilhada com o middleware."""
+    caixa = _tenant_id_ctx.get()
+    if caixa is not None:
+        caixa[0] = tenant_id
+
+
+def obter_tenant_id_atual() -> str | None:
+    """Retorna o tenantId da requisição atual armazenado no contexto."""
+    caixa = _tenant_id_ctx.get()
+    return caixa[0] if caixa else None
 
 
 class UsuarioAutenticado:
@@ -57,7 +73,11 @@ def extrair_usuario(
 
         decoded_claims: dict[str, Any] = auth.verify_id_token(token)
     except Exception as exc:
-        raise nao_autenticado(f"Falha ao validar token Firebase: {exc}") from exc
+        logger.warning(
+            "Falha na verificação do token Firebase",
+            extra={"evento": "token_invalido", "erroTipo": type(exc).__name__},
+        )
+        raise nao_autenticado("Token inválido ou expirado.") from exc
 
     uid = str(decoded_claims.get("uid", decoded_claims.get("user_id", "")))
     tenant_id = decoded_claims.get("tenantId")
@@ -72,6 +92,8 @@ def extrair_usuario(
             extra={"evento": "claims_ausentes", "tenantId": bool(tenant_id), "papel": bool(papel)},
         )
         raise acesso_proibido("Token não contém as custom claims necessárias (tenantId, papel).")
+
+    definir_tenant_id_atual(str(tenant_id))
 
     return UsuarioAutenticado(
         uid=uid,

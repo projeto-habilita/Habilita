@@ -102,6 +102,14 @@ class Settings(BaseSettings):
     # Chave service_role (SecretStr). Em prod, deve ser fornecida via ambiente e nunca ser a demo.
     supabase_service_key: SecretStr = Field(default=SecretStr(""))
 
+    # Job diário de recálculo e expurgo (ADR 0007 e ADR 0010)
+    # Token compartilhado com o GitHub Actions (mínimo de 16 caracteres quando configurado).
+    job_token: SecretStr = Field(default=SecretStr("demo-job-token-for-local-only"))
+    # Prazo de retenção para expurgo de arquivos em dias (ADR 0006 §3.4 / DO-13).
+    expurgo_retencao_dias: int = Field(default=90, ge=1, le=3650)
+    # Credencial opcional da conta de serviço do Firebase Admin em JSON ou Base64 (SG-05).
+    firebase_service_account_json: SecretStr = Field(default=SecretStr(""))
+
     @model_validator(mode="after")
     def validar_segredos_em_prod(self) -> Settings:
         """Garante que segredos obrigatórios não estejam vazios ou com chaves demo em produção."""

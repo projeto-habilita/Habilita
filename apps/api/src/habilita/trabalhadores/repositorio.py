@@ -26,7 +26,12 @@ from habilita.armazenamento import (
     construir_caminho,
 )
 from habilita.cadastros.repositorio import CadastrosRepositorio
-from habilita.comum.erros import conflito, recurso_nao_encontrado, requisicao_invalida
+from habilita.comum.erros import (
+    conflito,
+    recurso_nao_encontrado,
+    requisicao_invalida,
+    servico_indisponivel,
+)
 from habilita.comum.firestore import obter_firestore_client
 from habilita.config import CHAVE_DEMO_SUPABASE, get_settings
 from habilita.trabalhadores.schemas import (
@@ -697,9 +702,17 @@ class TrabalhadoresRepositorio:
                     extensao=extensao,
                     arquivo_uuid=arquivo_uuid,
                 )
-            except ArmazenamentoError:
-                if get_settings().app_env != "local":
-                    raise
+            except ArmazenamentoError as err:
+                # Issue #112: se o storage real ou injetado falhar, propaga 503
+                # e não persiste registro de documento órfão.
+                if (
+                    self.db is not None
+                    or get_settings().app_env != "local"
+                    or not isinstance(self.storage, SupabaseArmazenamento)
+                ):
+                    raise servico_indisponivel(
+                        "Serviço de armazenamento de documentos indisponível no momento."
+                    ) from err
 
         arquivo_registro = arquivo_meta.model_dump()
         arquivo_registro["caminho"] = caminho_storage
@@ -719,17 +732,62 @@ class TrabalhadoresRepositorio:
         }
 
         if self.db is not None:
-            self._tenant_ref().collection("documentos").document(doc_id).set(registro)
-            trb_ref = self._tenant_ref().collection("trabalhadores").document(trabalhador_id)
-            trb_ref.collection("documentos").document(doc_id).set(registro)
+            batch = self.db.batch()
+            doc_ref = self._tenant_ref().collection("documentos").document(doc_id)
+            sub_ref = (
+                self._tenant_ref()
+                .collection("trabalhadores")
+                .document(trabalhador_id)
+                .collection("documentos")
+                .document(doc_id)
+            )
+            batch.set(doc_ref, registro)
+            batch.set(sub_ref, registro)
+            batch.commit()
         elif get_settings().app_env != "local":
             raise RuntimeError("Armazenamento em memória não é permitido fora de ENV=local.")
-
-        if get_settings().app_env == "local":
+        else:
             docs_map = _BANCO_DOCUMENTOS.setdefault(self.tenant_id, {})
             docs_map[doc_id] = registro
 
         return self._montar_documento(registro)
+
+    def _atualizar_status_revisao_atomico(
+        self,
+        documento_id: str,
+        trabalhador_id: str,
+        atualizacao: dict[str, Any],
+        acao: str,
+    ) -> None:
+        """Garante transição atômica a partir de PENDENTE e escrita única (Issue #113)."""
+        if self.db is not None:
+            doc_ref = self._tenant_ref().collection("documentos").document(documento_id)
+            sub_doc = (
+                self._tenant_ref()
+                .collection("trabalhadores")
+                .document(trabalhador_id)
+                .collection("documentos")
+                .document(documento_id)
+            )
+            snap_atual = doc_ref.get()
+            if snap_atual.exists:
+                dados_atuais = snap_atual.to_dict() or {}
+                if dados_atuais.get("statusRevisao", "PENDENTE") != "PENDENTE":
+                    raise conflito(f"Apenas documentos com status PENDENTE podem ser {acao}.")
+            batch = self.db.batch()
+            if snap_atual.exists:
+                batch.update(doc_ref, atualizacao)
+            if sub_doc.get().exists:
+                batch.update(sub_doc, atualizacao)
+            batch.commit()
+        elif get_settings().app_env != "local":
+            raise RuntimeError("Armazenamento em memória não é permitido fora de ENV=local.")
+        else:
+            docs_map = _BANCO_DOCUMENTOS.setdefault(self.tenant_id, {})
+            if documento_id in docs_map:
+                if docs_map[documento_id].get("statusRevisao") != "PENDENTE":
+                    raise conflito(f"Apenas documentos com status PENDENTE podem ser {acao}.")
+                docs_map[documento_id].update(atualizacao)
 
     def aprovar_documento(
         self, documento_id: str, valido_ate_override: str | None = None
@@ -761,26 +819,12 @@ class TrabalhadoresRepositorio:
             "motivoRejeicao": None,
         }
 
-        if self.db is not None:
-            doc_ref = self._tenant_ref().collection("documentos").document(documento_id)
-            if doc_ref.get().exists:
-                doc_ref.update(atualizacao)
-            sub_doc = (
-                self._tenant_ref()
-                .collection("trabalhadores")
-                .document(doc.trabalhadorId)
-                .collection("documentos")
-                .document(documento_id)
-            )
-            if sub_doc.get().exists:
-                sub_doc.update(atualizacao)
-        elif get_settings().app_env != "local":
-            raise RuntimeError("Armazenamento em memória não é permitido fora de ENV=local.")
-
-        if get_settings().app_env == "local":
-            docs_map = _BANCO_DOCUMENTOS.setdefault(self.tenant_id, {})
-            if documento_id in docs_map:
-                docs_map[documento_id].update(atualizacao)
+        self._atualizar_status_revisao_atomico(
+            documento_id=documento_id,
+            trabalhador_id=doc.trabalhadorId,
+            atualizacao=atualizacao,
+            acao="aprovados",
+        )
 
         doc_dict = doc.model_dump()
         doc_dict.update(atualizacao)
@@ -801,26 +845,12 @@ class TrabalhadoresRepositorio:
             "motivoRejeicao": motivo,
         }
 
-        if self.db is not None:
-            doc_ref = self._tenant_ref().collection("documentos").document(documento_id)
-            if doc_ref.get().exists:
-                doc_ref.update(atualizacao)
-            sub_doc = (
-                self._tenant_ref()
-                .collection("trabalhadores")
-                .document(doc.trabalhadorId)
-                .collection("documentos")
-                .document(documento_id)
-            )
-            if sub_doc.get().exists:
-                sub_doc.update(atualizacao)
-        elif get_settings().app_env != "local":
-            raise RuntimeError("Armazenamento em memória não é permitido fora de ENV=local.")
-
-        if get_settings().app_env == "local":
-            docs_map = _BANCO_DOCUMENTOS.setdefault(self.tenant_id, {})
-            if documento_id in docs_map:
-                docs_map[documento_id].update(atualizacao)
+        self._atualizar_status_revisao_atomico(
+            documento_id=documento_id,
+            trabalhador_id=doc.trabalhadorId,
+            atualizacao=atualizacao,
+            acao="rejeitados",
+        )
 
         doc_dict = doc.model_dump()
         doc_dict.update(atualizacao)

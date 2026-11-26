@@ -129,7 +129,8 @@ def test_trabalhadores_repositorio_grava_no_firestore() -> None:
     )
     assert doc.trabalhadorId == trb.id
     mock_doc_col.document.assert_called_with(doc.id)
-    mock_doc_col.document.return_value.set.assert_called_once()
+    assert mock_db.batch.return_value.set.call_count >= 1
+    assert mock_db.batch.return_value.commit.call_count >= 1
 
     # 3. Aprovação de Documento
     mock_doc_snap = MagicMock()
@@ -151,7 +152,7 @@ def test_trabalhadores_repositorio_grava_no_firestore() -> None:
 
     doc_aprovado = repo.aprovar_documento(doc.id)
     assert doc_aprovado.statusRevisao == "APROVADO"
-    mock_doc_col.document.return_value.update.assert_called_once()
+    assert mock_db.batch.return_value.update.call_count >= 1
 
 
 def test_trabalhadores_repositorio_compatibilidade_seed_e_isolamento_tenant() -> None:

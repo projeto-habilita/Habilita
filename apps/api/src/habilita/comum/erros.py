@@ -127,6 +127,16 @@ def tipo_midia_nao_suportado(
     )
 
 
+def servico_indisponivel(
+    detail: str = "Serviço externo temporariamente indisponível.",
+) -> AppException:
+    return AppException(
+        status_code=503,
+        title="Serviço indisponível",
+        detail=detail,
+    )
+
+
 def extrair_request_id(request: Request) -> str | None:
     return getattr(request.state, "request_id", None) or request.headers.get("X-Request-Id")
 
