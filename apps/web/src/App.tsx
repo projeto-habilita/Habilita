@@ -3,6 +3,7 @@ import { ErrorState } from './components/ErrorState'
 import { LoadingState } from './components/LoadingState'
 import { LoginPanel, type SessaoAutenticada } from './components/LoginPanel'
 import { TrabalhadoresPanel } from './components/TrabalhadoresPanel'
+import { AprovacoesPanel } from './components/AprovacoesPanel'
 
 type HealthState =
   { kind: 'loading' } | { kind: 'success'; status: string } | { kind: 'error'; message: string }
@@ -70,6 +71,9 @@ export default function App() {
       <LoginPanel onSessionChange={setSessao} />
       {sessao && sessao.papel !== 'porteiro' && (
         <TrabalhadoresPanel key={sessao.usuario.uid} sessao={sessao} />
+      )}
+      {sessao && (sessao.papel === 'admin_contratante' || sessao.papel === 'analista_sst') && (
+        <AprovacoesPanel key={sessao.usuario.uid} sessao={sessao} />
       )}
       {sessao && sessao.papel === 'porteiro' && (
         <p role="status">A jornada de trabalhadores não está disponível para o perfil porteiro.</p>

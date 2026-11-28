@@ -1,0 +1,23 @@
+.semaforo-trabalhador {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid #dbe4ee;
+  background: #f7f9fc;
+  border-radius: 8px;
+}
+.semaforo-trabalhador__alocacao {
+  border-bottom: 1px solid #dbe4ee;
+  padding-block: 0.5rem;
+}
+.semaforo-trabalhador__verde {
+  color: #176340;
+}
+.semaforo-trabalhador__amarelo {
+  color: #805400;
+}
+.semaforo-trabalhador__vermelho {
+  color: #a1232c;
+}
+.semaforo-trabalhador li {
+  margin-block: 0.25rem;
+}

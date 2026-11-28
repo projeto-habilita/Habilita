@@ -1,0 +1,107 @@
+.aprovacoes-panel {
+  margin-block: 1.5rem;
+  padding: 1.5rem;
+  border: 1px solid #dbe4ee;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.aprovacoes-panel__header,
+.aprovacoes-panel__pagination {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.aprovacoes-panel__header h2 {
+  margin: 0;
+}
+.aprovacoes-panel__eyebrow {
+  color: #174d83;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.aprovacoes-panel button {
+  padding: 0.55rem 0.75rem;
+  border: 1px solid #174d83;
+  border-radius: 8px;
+  background: white;
+  color: #174d83;
+  font: inherit;
+  cursor: pointer;
+}
+.aprovacoes-panel button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.aprovacoes-panel__scroll {
+  overflow-x: auto;
+  margin-block: 1rem;
+}
+.aprovacoes-panel table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+.aprovacoes-panel th,
+.aprovacoes-panel td {
+  padding: 0.7rem;
+  border-bottom: 1px solid #dbe4ee;
+}
+.aprovacoes-panel th {
+  background: #f1f5f9;
+}
+.aprovacoes-panel caption {
+  text-align: left;
+  padding-bottom: 0.6rem;
+}
+.aprovacoes-panel__empty {
+  padding: 1rem;
+  background: #f1f5f9;
+  border-radius: 8px;
+}
+.aprovacoes-panel__success {
+  color: #126039;
+  font-weight: 700;
+}
+.aprovacoes-panel__error {
+  color: #991b1b;
+}
+.aprovacoes-panel__review {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #f7f9fc;
+  border: 1px solid #dbe4ee;
+  border-radius: 8px;
+}
+.aprovacoes-panel__actions {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) minmax(12rem, 2fr);
+  align-items: start;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.aprovacoes-panel__actions form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.aprovacoes-panel__actions textarea {
+  font: inherit;
+  padding: 0.75rem;
+  border: 1px solid #9fb1c4;
+  border-radius: 8px;
+}
+.aprovacoes-panel__pagination {
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+@media (max-width: 640px) {
+  .aprovacoes-panel__actions {
+    grid-template-columns: 1fr;
+  }
+}

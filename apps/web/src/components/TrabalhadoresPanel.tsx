@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { getIdToken } from 'firebase/auth'
 import { ErrorState } from './ErrorState'
 import { LoadingState } from './LoadingState'
+import { SemaforoTrabalhador } from './SemaforoTrabalhador'
 import type { SessaoAutenticada } from './LoginPanel'
 import './TrabalhadoresPanel.css'
 
@@ -57,6 +58,7 @@ export function TrabalhadoresPanel({ sessao }: { sessao: SessaoAutenticada }) {
   const [cursores, setCursores] = useState<Array<string | null>>([null])
   const [indice, setIndice] = useState(0)
   const [tentativas, setTentativas] = useState(0)
+  const [trabalhadorSelecionado, setTrabalhadorSelecionado] = useState<string | null>(null)
   const cursor = cursores[indice] ?? null
 
   useEffect(() => {
@@ -154,6 +156,7 @@ export function TrabalhadoresPanel({ sessao }: { sessao: SessaoAutenticada }) {
                 <th scope="col">CPF</th>
                 <th scope="col">Terceirizada</th>
                 <th scope="col">Situação</th>
+                <th scope="col">Semáforo</th>
               </tr>
             </thead>
             <tbody>
@@ -167,12 +170,36 @@ export function TrabalhadoresPanel({ sessao }: { sessao: SessaoAutenticada }) {
                       {trabalhador.ativo ? 'Ativo' : 'Inativo'}
                     </span>
                   </td>
+                  <td>
+                    <button
+                      type="button"
+                      aria-expanded={trabalhadorSelecionado === trabalhador.id}
+                      onClick={() =>
+                        setTrabalhadorSelecionado((atual) =>
+                          atual === trabalhador.id ? null : trabalhador.id,
+                        )
+                      }
+                    >
+                      {trabalhadorSelecionado === trabalhador.id
+                        ? 'Fechar semáforo'
+                        : 'Ver semáforo'}
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+      {trabalhadorSelecionado &&
+        estado.kind === 'success' &&
+        estado.pagina.itens.some((t) => t.id === trabalhadorSelecionado) && (
+          <SemaforoTrabalhador
+            key={trabalhadorSelecionado}
+            sessao={sessao}
+            trabalhadorId={trabalhadorSelecionado}
+          />
+        )}
       {estado.kind === 'success' && (
         <nav className="trabalhadores-panel__pagination" aria-label="Paginação de trabalhadores">
           <button type="button" onClick={paginaAnterior} disabled={indice === 0}>
