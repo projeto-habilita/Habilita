@@ -1,10 +1,18 @@
 body {
   margin: 0;
+  background: #f7f9fc;
+  color: #142b49;
   font-family: system-ui, sans-serif;
 }
 
 main {
-  max-width: 40rem;
+  max-width: 72rem;
   margin: 2rem auto;
   padding: 0 1rem;
+}
+
+button:focus-visible,
+a:focus-visible {
+  outline: 3px solid #2463eb;
+  outline-offset: 2px;
 }

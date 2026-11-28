@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ErrorState } from './components/ErrorState'
 import { LoadingState } from './components/LoadingState'
 import { LoginPanel, type SessaoAutenticada } from './components/LoginPanel'
+import { TrabalhadoresPanel } from './components/TrabalhadoresPanel'
 
 type HealthState =
   { kind: 'loading' } | { kind: 'success'; status: string } | { kind: 'error'; message: string }
@@ -67,10 +68,11 @@ export default function App() {
       <h1>Habilita</h1>
       <HealthBlock />
       <LoginPanel onSessionChange={setSessao} />
-      {sessao && (
-        <p role="status">
-          Perfil autenticado. A listagem de trabalhadores será integrada na próxima entrega (FE-05).
-        </p>
+      {sessao && sessao.papel !== 'porteiro' && (
+        <TrabalhadoresPanel key={sessao.usuario.uid} sessao={sessao} />
+      )}
+      {sessao && sessao.papel === 'porteiro' && (
+        <p role="status">A jornada de trabalhadores não está disponível para o perfil porteiro.</p>
       )}
     </main>
   )

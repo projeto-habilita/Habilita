@@ -1,0 +1,98 @@
+.trabalhadores-panel {
+  margin-block: 1.5rem;
+  padding: 1.5rem;
+  border: 1px solid #dbe4ee;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.trabalhadores-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.trabalhadores-panel__header h2 {
+  margin: 0;
+}
+
+.trabalhadores-panel__header p {
+  margin: 0.35rem 0 1rem;
+}
+
+.trabalhadores-panel__eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: #174d83;
+}
+
+.trabalhadores-panel button {
+  padding: 0.6rem 1rem;
+  border: 1px solid #174d83;
+  border-radius: 8px;
+  background: #fff;
+  color: #174d83;
+  font: inherit;
+  cursor: pointer;
+}
+
+.trabalhadores-panel button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.trabalhadores-panel__empty {
+  padding: 1.5rem;
+  text-align: center;
+  border: 1px dashed #9fb1c4;
+  border-radius: 8px;
+  color: #475569;
+}
+
+.trabalhadores-panel__table-scroll {
+  overflow-x: auto;
+}
+
+.trabalhadores-panel table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.trabalhadores-panel caption {
+  text-align: left;
+  padding-bottom: 0.6rem;
+  color: #475569;
+}
+
+.trabalhadores-panel th,
+.trabalhadores-panel td {
+  padding: 0.75rem;
+  border-bottom: 1px solid #dbe4ee;
+}
+
+.trabalhadores-panel th {
+  background: #f1f5f9;
+}
+
+.status-ativo {
+  color: #176340;
+  font-weight: 700;
+}
+
+.status-inativo {
+  color: #9c2531;
+  font-weight: 700;
+}
+
+.trabalhadores-panel__pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
